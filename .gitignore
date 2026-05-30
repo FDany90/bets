@@ -1,0 +1,11 @@
+# Contiene la contraseña de la DB y no se necesita en producción
+supabase-schema.sql
+
+# Carpeta solo para Netlify Drop (Vercel sirve desde la raíz)
+dist/
+
+# Vercel / varios
+.vercel/
+node_modules/
+.DS_Store
+Thumbs.db

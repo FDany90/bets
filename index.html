@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apuestas · Historial</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📊 Apuestas</h1>
+      <nav class="tabs">
+        <button class="tab active" data-tab="reportes">Reportes</button>
+        <button class="tab" data-tab="apuestas">Apuestas</button>
+        <button class="tab" data-tab="config">Configuración</button>
+      </nav>
+    </header>
+
+    <div id="banner"></div>
+    <main id="view"></main>
+  </div>
+
+  <!-- Supabase JS desde CDN (sin build) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
