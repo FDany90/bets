@@ -70,8 +70,11 @@ function apuestasFiltradas() {
 function calcLinea(l) {
   const cargado = num(l.monto_cargado);
   const apostado = cargado * (1 + num(l.bono_pct) / 100);
-  const premio = apostado * num(l.cuota);
-  return { cargado, apostado, premio };
+  const cuota = num(l.cuota);
+  const gratis = num(l.apuesta_gratis); // apuesta gratis: NO es dinero ingresado
+  // pago normal + pago de la apuesta gratis (la casa retiene el monto: gratis × (cuota − 1))
+  const premio = apostado * cuota + (cuota > 0 ? gratis * (cuota - 1) : 0);
+  return { cargado, apostado, premio, gratis };
 }
 
 function calcApuesta(a) {
@@ -318,8 +321,13 @@ function bonoDeCasa(nombre) {
   return c ? c.bono_pct : 0;
 }
 
+function casaPermiteGratis(nombre) {
+  const c = state.casas.find((x) => x.nombre === nombre);
+  return !!(c && c.permite_gratis);
+}
+
 function nuevaLinea(casa = "") {
-  return { casa, monto_cargado: "", bono_pct: bonoDeCasa(casa), cuota: "", resultado: "" };
+  return { casa, monto_cargado: "", bono_pct: bonoDeCasa(casa), cuota: "", resultado: "", apuesta_gratis: "" };
 }
 
 function abrirModal(apuesta) {
@@ -399,10 +407,14 @@ function renderLineas(dlg) {
   cont.innerHTML = modalLineas.map((l, i) => {
     const c = calcLinea(l);
     const casaOpts = state.casas.map((x) => `<option ${x.nombre === l.casa ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+    const gratisField = casaPermiteGratis(l.casa)
+      ? `<div><label>🎁 Apuesta gratis</label><input type="number" step="any" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
+      : "";
     return `<div class="linea" data-i="${i}">
       <div><label>Casa</label><select data-f="casa"><option value="">—</option>${casaOpts}</select></div>
       <div><label>Cargado (real)</label><input type="number" step="any" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
       <div><label>Bono %</label><input type="number" step="any" data-f="bono_pct" value="${l.bono_pct}" /></div>
+      ${gratisField}
       <div><label>Cuota</label><input type="number" step="any" data-f="cuota" value="${l.cuota}" /></div>
       <div><label>Resultado</label><input data-f="resultado" value="${esc(l.resultado || "")}" placeholder="PSG / Empate" /></div>
       <div class="calc"><span class="calc-txt">apostado<b>${money(c.apostado)}</b>premio ${money(c.premio)}</span>
@@ -417,10 +429,13 @@ function renderLineas(dlg) {
       const f = inp.dataset.f;
       modalLineas[i][f] = inp.value;
       if (f === "casa") {
-        // al cambiar la casa, autocompletar el bono sin re-render total
+        // al cambiar la casa: autocompletar bono y re-render (para mostrar/ocultar "Apuesta gratis")
         modalLineas[i].bono_pct = bonoDeCasa(inp.value);
-        const bonoInp = $('[data-f="bono_pct"]', row);
-        if (bonoInp) bonoInp.value = modalLineas[i].bono_pct;
+        if (!casaPermiteGratis(inp.value)) modalLineas[i].apuesta_gratis = "";
+        renderLineas(dlg);
+        renderGanador(dlg, $("[name=resultado_ganador]", dlg)?.value);
+        actualizarResumen(dlg);
+        return;
       }
       // actualizar solo el texto del cálculo de esta línea (no re-render → no se pierde el foco)
       const c = calcLinea(modalLineas[i]);
@@ -456,8 +471,11 @@ function actualizarResumen(dlg) {
   };
   const c = calcApuesta(fake);
   const premioAuto = c.premioGanador;
+  const totalGratis = modalLineas.reduce((s, l) => s + num(l.apuesta_gratis), 0);
   $("#resumen", dlg).innerHTML =
-    `Ingresado: <b>${money(c.ingresado)}</b> · Apostado: <b>${money(c.apostado)}</b> · Premio línea ganadora: <b>${money(premioAuto)}</b>` +
+    `Ingresado: <b>${money(c.ingresado)}</b> · Apostado: <b>${money(c.apostado)}</b>` +
+    (totalGratis > 0 ? ` · 🎁 Apuesta gratis: <b>${money(totalGratis)}</b>` : "") +
+    ` · Premio línea ganadora: <b>${money(premioAuto)}</b>` +
     (c.profit != null ? ` · Profit: <b class="${c.profit >= 0 ? "pos" : "neg"}">${money(c.profit)}</b> (${pct(c.pct)})` : "");
 }
 
@@ -490,7 +508,7 @@ async function guardarApuesta(dlg, id) {
   }
 
   const lineasPayload = modalLineas
-    .filter((l) => l.casa || num(l.monto_cargado) > 0)
+    .filter((l) => l.casa || num(l.monto_cargado) > 0 || num(l.apuesta_gratis) > 0)
     .map((l, i) => ({
       apuesta_id: apuestaId,
       casa: l.casa || "",
@@ -498,6 +516,7 @@ async function guardarApuesta(dlg, id) {
       bono_pct: num(l.bono_pct),
       cuota: l.cuota === "" ? null : num(l.cuota),
       resultado: (l.resultado || "").trim() || null,
+      apuesta_gratis: num(l.apuesta_gratis),
       orden: i,
     }));
   if (lineasPayload.length) {
@@ -522,7 +541,7 @@ async function borrarApuesta(id) {
 //   VISTA: CONFIGURACIÓN (casas y cajeras)
 // ============================================================
 function viewConfig() {
-  const casas = state.casas.map((c) => `<div class="chip">${esc(c.nombre)} <span class="muted">· bono ${c.bono_pct}%</span>
+  const casas = state.casas.map((c) => `<div class="chip">${esc(c.nombre)} <span class="muted">· bono ${c.bono_pct}%${c.permite_gratis ? " · 🎁 gratis" : ""}</span>
     <button data-del-casa="${c.id}" title="Borrar">✕</button></div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="chip">${esc(c.nombre)}
     <button data-del-cajera="${c.id}" title="Borrar">✕</button></div>`).join("");
@@ -534,6 +553,9 @@ function viewConfig() {
       <div class="row">
         <div class="field"><label>Nombre</label><input id="casa-nombre" placeholder="Ej. Vira" /></div>
         <div class="field"><label>Bono %</label><input id="casa-bono" type="number" step="any" value="0" /></div>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="casa-gratis" style="width:auto" /> 🎁 Da apuesta gratis
+        </label>
         <button class="btn-primary" id="add-casa">Agregar casa</button>
       </div>
     </div>
@@ -552,7 +574,11 @@ function bindConfig() {
   $("#add-casa")?.addEventListener("click", async () => {
     const nombre = $("#casa-nombre").value.trim();
     if (!nombre) return;
-    const { error } = await sb.from("casas").insert({ nombre, bono_pct: num($("#casa-bono").value) });
+    const { error } = await sb.from("casas").insert({
+      nombre,
+      bono_pct: num($("#casa-bono").value),
+      permite_gratis: $("#casa-gratis").checked,
+    });
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   });

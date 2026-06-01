@@ -1,5 +1,5 @@
-# Contiene la contraseña de la DB y no se necesita en producción
-supabase-schema.sql
+# Los .sql son solo para correr en Supabase (uno tiene la contraseña). No van a la web.
+*.sql
 
 # Carpeta solo para Netlify Drop (Vercel sirve desde la raíz)
 dist/
