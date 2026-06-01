@@ -20,7 +20,8 @@ const state = {
   casas: [],     // {id, nombre, bono_pct}
   cajeras: [],   // {id, nombre}
   apuestas: [],  // {..., lineas:[...]}
-  pagina: 1,     // paginado del listado de apuestas
+  pagina: 1,         // paginado del listado de apuestas
+  filtroEstado: "",  // chip de estado en la pestaña Apuestas ("" = todas)
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
 };
 
@@ -32,6 +33,12 @@ const num = (v) => {
 const money = (v) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(v || 0);
 const pct = (v) => (v == null ? "—" : `${v.toFixed(2)}%`);
+// Agrega "hs" al final de la hora si no lo tiene ya
+const fmtHora = (h) => {
+  const t = String(h ?? "").trim();
+  if (!t) return "";
+  return /hs/i.test(t) ? t : `${t} hs`;
+};
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -96,6 +103,31 @@ function calcApuesta(a) {
 
   const pctv = profit != null && ingresado > 0 ? (profit / ingresado) * 100 : null;
   return { ingresado, apostado, premioGanador, premio, profit, pct: pctv };
+}
+
+// Premio / profit / % potencial de cada casa (si gana esa línea), sobre el total ingresado
+function potencialPorCasa(a) {
+  const ingresado = calcApuesta(a).ingresado;
+  return (a.lineas || [])
+    .map((l) => {
+      const premio = calcLinea(l).premio;
+      const prof = premio - ingresado;
+      const pctv = ingresado > 0 ? (prof / ingresado) * 100 : null;
+      return { casa: l.casa || "—", premio, prof, pct: pctv };
+    })
+    .filter((x) => x.premio > 0);
+}
+
+// Renderiza la lista por casa para una columna (premio | profit | pct)
+function potListHtml(pot, tipo) {
+  if (!pot.length) return "—";
+  return `<div class="pot-list">${pot.map((p) => {
+    let val = "", cls = "";
+    if (tipo === "premio") { val = money(p.premio); }
+    else if (tipo === "profit") { val = money(p.prof); cls = p.prof >= 0 ? "pos" : "neg"; }
+    else { val = p.pct == null ? "—" : (p.pct >= 0 ? "+" : "") + p.pct.toFixed(1) + "%"; cls = p.pct == null ? "muted" : p.pct >= 0 ? "pos" : "neg"; }
+    return `<div class="pot-row"><span class="pot-casa">${esc(p.casa)}</span><span class="${cls}">${val}</span></div>`;
+  }).join("")}</div>`;
 }
 
 // ---------- Carga de datos ----------
@@ -249,27 +281,53 @@ function bindReportes() {
 //   VISTA: APUESTAS
 // ============================================================
 function viewApuestas() {
-  const total = state.apuestas.length;
+  // conteo por estado (sobre todas las apuestas) para los chips
+  const cont = { "": state.apuestas.length, Pendiente: 0, Cobrado: 0, Perdido: 0 };
+  state.apuestas.forEach((a) => { cont[a.estado] = (cont[a.estado] || 0) + 1; });
+
+  const lista = state.filtroEstado
+    ? state.apuestas.filter((a) => a.estado === state.filtroEstado)
+    : state.apuestas;
+
+  const total = lista.length;
   const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (state.pagina > paginas) state.pagina = paginas;
   if (state.pagina < 1) state.pagina = 1;
   const inicio = (state.pagina - 1) * PAGE_SIZE;
-  const visibles = state.apuestas.slice(inicio, inicio + PAGE_SIZE);
+  const visibles = lista.slice(inicio, inicio + PAGE_SIZE);
+
+  const chips = [["", "Todas"], ["Pendiente", "Pendientes"], ["Cobrado", "Cobradas"], ["Perdido", "Perdidas"]]
+    .map(([v, t]) => `<button class="chip-f ${state.filtroEstado === v ? "active" : ""}" data-estado="${v}">${t} <span class="chip-n">${cont[v] || 0}</span></button>`)
+    .join("");
 
   const filas = visibles.map((a) => {
     const c = calcApuesta(a);
+    // Pendiente → desglose potencial por casa (premio / profit / %); resuelto → valores reales
+    const pend = a.estado === "Pendiente";
+    const pot = pend ? potencialPorCasa(a) : [];
+    const premioCell = pend ? potListHtml(pot, "premio") : money(c.premio);
+    const profitCell = pend ? potListHtml(pot, "profit") : (c.profit == null ? "—" : money(c.profit));
+    const pctCell = pend ? potListHtml(pot, "pct") : pct(c.pct);
     return `<tr>
       <td data-label="Partido">${esc(a.partido)}</td>
-      <td data-label="Fecha">${esc(a.fecha || "")}${a.hora ? " · " + esc(a.hora) : ""}</td>
+      <td data-label="Fecha">${esc(a.fecha || "")}${a.hora ? " · " + esc(fmtHora(a.hora)) : ""}</td>
       <td data-label="Cajera">${esc(a.cajera || "")}</td>
       <td data-label="Estado"><span class="badge ${esc(a.estado)}">${esc(a.estado)}</span></td>
       <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
-      <td class="num" data-label="Premio">${a.estado === "Pendiente" ? "—" : money(c.premio)}</td>
-      <td class="num ${c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="Profit">${c.profit == null ? "—" : money(c.profit)}</td>
-      <td class="num ${c.pct == null ? "" : c.pct >= 0 ? "pos" : "neg"}" data-label="%">${pct(c.pct)}</td>
+      <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>
+      <td class="num ${pend || c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="${pend ? "Profit potencial" : "Profit"}">${profitCell}</td>
+      <td class="num ${pend || c.pct == null ? "" : c.pct >= 0 ? "pos" : "neg"}" data-label="${pend ? "% potencial" : "%"}">${pctCell}</td>
       <td data-label="">
-        <button class="btn-ghost btn-sm" data-edit="${a.id}">Editar</button>
-        <button class="btn-danger btn-sm" data-del="${a.id}">✕</button>
+        <div class="acciones">
+          <div class="acc-left">
+            <button class="btn-danger btn-sm" data-del="${a.id}" title="Eliminar">🗑️</button>
+            <button class="btn-ghost btn-sm" data-edit="${a.id}">✏️ Editar</button>
+          </div>
+          <div class="acc-right">
+            ${pend ? `<button class="btn-primary btn-sm" data-resolver="${a.id}">✅ Resolver</button>` : ""}
+            <button class="btn-ghost btn-sm" data-detalle="${a.id}">👁️ Detalle</button>
+          </div>
+        </div>
       </td>
     </tr>`;
   }).join("");
@@ -289,6 +347,7 @@ function viewApuestas() {
       <div class="spacer"></div>
       <span class="muted">${total ? `${desde}–${hasta} de ${total}` : "0"} apuesta(s)</span>
     </div>
+    <div class="chips-filtro">${chips}</div>
     <div class="card tbl-wrap">
       <table class="apuestas-tbl">
         <thead><tr>
@@ -306,9 +365,18 @@ function bindApuestas() {
   $("#nueva")?.addEventListener("click", () => abrirModal(null));
   $$("[data-edit]").forEach((b) => b.addEventListener("click", () =>
     abrirModal(state.apuestas.find((a) => a.id === b.dataset.edit))));
+  $$("[data-resolver]").forEach((b) => b.addEventListener("click", () =>
+    abrirResolver(state.apuestas.find((a) => a.id === b.dataset.resolver))));
+  $$("[data-detalle]").forEach((b) => b.addEventListener("click", () =>
+    abrirDetalle(state.apuestas.find((a) => a.id === b.dataset.detalle))));
   $$("[data-del]").forEach((b) => b.addEventListener("click", () => borrarApuesta(b.dataset.del)));
   $("#prev")?.addEventListener("click", () => { state.pagina--; render(); });
   $("#next")?.addEventListener("click", () => { state.pagina++; render(); });
+  $$("[data-estado]").forEach((b) => b.addEventListener("click", () => {
+    state.filtroEstado = b.dataset.estado;
+    state.pagina = 1; // al cambiar el filtro, volver a la primera página
+    render();
+  }));
 }
 
 // ============================================================
@@ -535,6 +603,165 @@ async function borrarApuesta(id) {
   if (error) { alert("Error: " + error.message); return; }
   await cargarTodo();
   render();
+}
+
+// ============================================================
+//   POPUP: Ver detalle (solo lectura)
+// ============================================================
+function abrirDetalle(a) {
+  if (!a) return;
+  const c = calcApuesta(a);
+  const lineasRows = (a.lineas || []).map((l) => {
+    const lc = calcLinea(l);
+    return `<tr>
+      <td>${esc(l.casa || "—")}</td>
+      <td class="num">${money(num(l.monto_cargado))}</td>
+      <td class="num">${num(l.bono_pct)}%</td>
+      <td class="num">${num(l.apuesta_gratis) > 0 ? money(num(l.apuesta_gratis)) : "—"}</td>
+      <td class="num">${l.cuota == null || l.cuota === "" ? "—" : num(l.cuota)}</td>
+      <td>${esc(l.resultado || "—")}</td>
+      <td class="num">${money(lc.apostado)}</td>
+      <td class="num">${money(lc.premio)}</td>
+    </tr>`;
+  }).join("");
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-detalle">
+      <div class="modal-head">
+        <h2 style="margin:0">${esc(a.partido)} <span class="badge ${esc(a.estado)}" style="margin-left:8px">${esc(a.estado)}</span></h2>
+        <button type="button" class="btn-ghost btn-sm" id="d-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="detalle-grid">
+          <div><label>Fecha</label><div class="ro">${esc(a.fecha || "—")}</div></div>
+          <div><label>Hora</label><div class="ro">${a.hora ? esc(fmtHora(a.hora)) : "—"}</div></div>
+          <div><label>Cajera</label><div class="ro">${esc(a.cajera || "—")}</div></div>
+          <div><label>Resultado ganador</label><div class="ro">${esc(a.resultado_ganador || "—")}</div></div>
+        </div>
+        ${a.notas ? `<div style="margin-top:12px"><label>Notas</label><div class="ro">${esc(a.notas)}</div></div>` : ""}
+
+        <h2 style="margin:18px 0 8px">Casas</h2>
+        <div class="tbl-wrap"><table>
+          <thead><tr>
+            <th>Casa</th><th class="num">Cargado</th><th class="num">Bono</th><th class="num">🎁 Gratis</th>
+            <th class="num">Cuota</th><th>Resultado</th><th class="num">Apostado</th><th class="num">Premio</th>
+          </tr></thead>
+          <tbody>${lineasRows || `<tr><td colspan="8" class="muted">Sin casas</td></tr>`}</tbody>
+        </table></div>
+
+        <div class="kpis" style="margin-top:16px">
+          <div class="kpi"><div class="label">Ingresado</div><div class="value" style="font-size:18px">${money(c.ingresado)}</div></div>
+          <div class="kpi"><div class="label">Apostado</div><div class="value" style="font-size:18px">${money(c.apostado)}</div></div>
+          <div class="kpi"><div class="label">Premio</div><div class="value" style="font-size:18px">${a.estado === "Pendiente" ? "—" : money(c.premio)}</div></div>
+          <div class="kpi"><div class="label">Profit</div><div class="value ${c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" style="font-size:18px">${c.profit == null ? "—" : money(c.profit)}</div></div>
+          <div class="kpi"><div class="label">%</div><div class="value ${c.pct == null ? "" : c.pct >= 0 ? "pos" : "neg"}" style="font-size:18px">${pct(c.pct)}</div></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="d-editar">Editar</button>
+        <button type="submit" class="btn-primary">Cerrar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#d-cerrar", dlg).addEventListener("click", cerrar);
+  $("#d-editar", dlg).addEventListener("click", () => { cerrar(); abrirModal(a); });
+  $("#form-detalle", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
+}
+
+// ============================================================
+//   POPUP: Resolver apuesta (solo datos de resolución)
+// ============================================================
+function abrirResolver(a) {
+  if (!a) return;
+  const resultados = [...new Set((a.lineas || []).map((l) => (l.resultado || "").trim()).filter(Boolean))];
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-resolver">
+      <div class="modal-head">
+        <h2 style="margin:0">Resolver — ${esc(a.partido)}</h2>
+        <button type="button" class="btn-ghost btn-sm" id="r-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid grid-3">
+          <div><label>Estado</label>
+            <select name="estado">
+              ${["Pendiente", "Cobrado", "Perdido"].map((e) => `<option ${a.estado === e ? "selected" : ""}>${e}</option>`).join("")}
+            </select>
+          </div>
+          <div><label>Resultado ganador</label>
+            <select name="resultado_ganador">
+              <option value="">— ninguno —</option>
+              ${resultados.map((r) => `<option ${a.resultado_ganador === r ? "selected" : ""}>${esc(r)}</option>`).join("")}
+            </select>
+          </div>
+          <div><label>Premio cobrado (editable)</label>
+            <input type="number" step="any" name="premio_cobrado" value="${a.premio_cobrado ?? ""}" placeholder="auto desde la cuota" />
+          </div>
+        </div>
+        <div id="r-resumen" class="muted" style="margin-top:12px"></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="r-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  const f = $("#form-resolver", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#r-cerrar", dlg).addEventListener("click", cerrar);
+  $("#r-cancelar", dlg).addEventListener("click", cerrar);
+
+  const refrescar = (autoPremio) => {
+    // si se cambió el resultado ganador, autocompletar el premio cobrado con el de la línea ganadora
+    if (autoPremio) {
+      const ganador = f.resultado_ganador.value;
+      const premioGanador = ganador
+        ? (a.lineas || []).filter((l) => (l.resultado || "") === ganador)
+            .reduce((s, l) => s + calcLinea(l).premio, 0)
+        : 0;
+      f.premio_cobrado.value = premioGanador ? premioGanador : "";
+    }
+    const c = calcApuesta({
+      estado: f.estado.value,
+      resultado_ganador: f.resultado_ganador.value || "",
+      premio_cobrado: f.premio_cobrado.value,
+      lineas: a.lineas,
+    });
+    $("#r-resumen", dlg).innerHTML =
+      `Ingresado: <b>${money(c.ingresado)}</b> · Premio: <b>${money(c.premio)}</b>` +
+      (c.profit != null ? ` · Profit: <b class="${c.profit >= 0 ? "pos" : "neg"}">${money(c.profit)}</b> (${pct(c.pct)})` : "");
+  };
+
+  f.estado.addEventListener("change", () => refrescar(false));
+  f.resultado_ganador.addEventListener("change", () => refrescar(true));
+  f.premio_cobrado.addEventListener("input", () => refrescar(false));
+  refrescar(false);
+
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    guardarResolucion(dlg, a.id).then((ok) => { if (ok) cerrar(); });
+  });
+}
+
+async function guardarResolucion(dlg, id) {
+  if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
+  const f = $("#form-resolver", dlg);
+  const payload = {
+    estado: f.estado.value,
+    resultado_ganador: f.resultado_ganador.value || null,
+    premio_cobrado: f.premio_cobrado.value === "" ? null : num(f.premio_cobrado.value),
+  };
+  const { error } = await sb.from("apuestas").update(payload).eq("id", id);
+  if (error) { alert("Error: " + error.message); return false; }
+  await cargarTodo();
+  render();
+  return true;
 }
 
 // ============================================================

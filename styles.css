@@ -100,6 +100,16 @@ tr:hover td { background: #1f2630; }
 .pos { color: var(--accent-hover); }
 .neg { color: var(--danger); }
 
+/* Acciones de la fila: eliminar/editar a la izquierda, resolver/detalle a la derecha */
+.acciones { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
+.acc-left, .acc-right { display: flex; gap: 6px; }
+
+/* Potencial por casa (apuestas pendientes): premio / profit / % */
+.pot-list { display: flex; flex-direction: column; gap: 3px; align-items: stretch; min-width: 120px; }
+.pot-row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.pot-row .pot-casa { color: var(--text-dim); font-size: 12px; margin-right: auto; }
+.pot-row span:last-child { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+
 .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.Pendiente { background: #3a2f0a; color: var(--warn); }
 .badge.Cobrado   { background: #0f2e1a; color: var(--accent-hover); }
@@ -107,7 +117,26 @@ tr:hover td { background: #1f2630; }
 
 /* ---------- Misc ---------- */
 .muted { color: var(--text-dim); font-size: 13px; }
+
+/* Detalle (solo lectura) */
+.detalle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.ro { color: var(--text); font-size: 14px; margin-top: 3px; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* Chips de filtro por estado (pestaña Apuestas) */
+.chips-filtro { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip-f {
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim);
+  padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.chip-f:hover { border-color: var(--blue); color: var(--text); }
+.chip-f.active { color: var(--text); border-color: var(--accent); background: #16261a; }
+.chip-n {
+  background: var(--bg-input); border-radius: 999px; padding: 1px 8px;
+  font-size: 11px; color: var(--text-dim);
+}
+.chip-f.active .chip-n { background: var(--accent); color: #fff; }
 .toolbar .spacer { flex: 1; }
 .banner {
   background: #3a2f0a; border: 1px solid var(--warn); color: #f0d590;
