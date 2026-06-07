@@ -11,5 +11,5 @@ window.APP_CONFIG = {
   SUPABASE_ANON_KEY: "sb_publishable_MoD0Ekw69nQpT3heT05IyQ_J4RDvHEh",
 
   // Casas que aparecen por defecto al crear una apuesta nueva
-  CASAS_POR_DEFECTO: ["Vira", "Betano"],
+  CASAS_POR_DEFECTO: ["Vira"],
 };

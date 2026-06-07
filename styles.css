@@ -111,9 +111,32 @@ tr:hover td { background: #1f2630; }
 .pot-row span:last-child { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.badge.Pendiente { background: #3a2f0a; color: var(--warn); }
-.badge.Cobrado   { background: #0f2e1a; color: var(--accent-hover); }
-.badge.Perdido   { background: #3a1414; color: var(--danger); }
+.badge.Pendiente  { background: #3a2f0a; color: var(--warn); }
+.badge.Cobrado    { background: #0f2e1a; color: var(--accent-hover); }
+.badge.Perdido    { background: #3a1414; color: var(--danger); }
+.badge.Finalizado { background: #15233a; color: var(--blue); }
+
+/* ---------- Tarjeta de partido (agrupa N apuestas) ---------- */
+.card.partido { padding-bottom: 16px; }
+.partido-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.partido-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.partido-head .acciones { width: auto; }
+.partido-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 12px; font-size: 13px; color: var(--text-dim); }
+.partido-meta b { color: var(--text); }
+
+/* ---------- Tarjeta de cajera (saldo / billetera) ---------- */
+.cajera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cajera-saldo { display: flex; flex-direction: column; margin: 12px 0; }
+.cajera-saldo .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.cajera-saldo .value { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cajera-desglose { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-dim); }
+.cajera-desglose b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Fila de cajera en Configuración (nombre + casino + borrar) */
+.cajera-cfg { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.cajera-cfg:last-child { border-bottom: none; }
+.cajera-cfg-nombre { flex: 1; }
+.cajera-cfg select { width: auto; min-width: 140px; }
 
 /* ---------- Misc ---------- */
 .muted { color: var(--text-dim); font-size: 13px; }
