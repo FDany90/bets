@@ -123,6 +123,12 @@ tr:hover td { background: #1f2630; }
 .partido-head .acciones { width: auto; }
 .partido-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 12px; font-size: 13px; color: var(--text-dim); }
 .partido-meta b { color: var(--text); }
+.partido-meta b.pos { color: var(--accent-hover); }
+.partido-meta b.neg { color: var(--danger); }
+.partido-balance { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 12px; padding: 8px 12px; background: var(--bg-input); border-radius: var(--radius); font-size: 13px; }
+.partido-balance .bal-title { color: var(--text-dim); font-weight: 600; }
+.partido-balance .bal-item { display: inline-flex; align-items: baseline; gap: 6px; }
+.partido-balance .bal-res { color: var(--text-dim); }
 
 /* ---------- Tarjeta de cajera (saldo / billetera) ---------- */
 .cajera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
