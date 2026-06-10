@@ -212,6 +212,16 @@ function potencialPorCasa(a) {
     .filter((x) => x.premio > 0);
 }
 
+// Lista por casa de "resultado @ cuota" de una apuesta (para verlo en la fila)
+function lineasApuestaHtml(a) {
+  const ls = (a.lineas || []).filter((l) => l.casa || l.resultado || l.cuota != null && l.cuota !== "");
+  if (!ls.length) return "—";
+  return `<div class="pot-list">${ls.map((l) => {
+    const cuota = (l.cuota == null || l.cuota === "") ? "—" : num(l.cuota);
+    return `<div class="pot-row"><span class="pot-casa">${esc(l.casa || "—")}</span><span>${esc(l.resultado || "—")} @ ${cuota}</span></div>`;
+  }).join("")}</div>`;
+}
+
 // Renderiza la lista por casa para una columna (premio | profit | pct)
 function potListHtml(pot, tipo) {
   if (!pot.length) return "—";
@@ -504,14 +514,13 @@ function filaApuesta(a) {
   const pot = pend ? potencialPorCasa(a) : [];
   const premioCell = pend ? potListHtml(pot, "premio") : money(c.premio);
   const profitCell = pend ? potListHtml(pot, "profit") : (c.profit == null ? "—" : money(c.profit));
-  const pctCell = pend ? potListHtml(pot, "pct") : pct(c.pct);
   return `<tr>
     <td data-label="Cajera">${esc(a.cajera || "—")}</td>
     <td data-label="Estado"><span class="badge ${esc(c.estado)}">${esc(c.estado)}</span></td>
+    <td data-label="Resultado / Cuota">${lineasApuestaHtml(a)}</td>
     <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
     <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>
     <td class="num ${pend || c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="${pend ? "Profit potencial" : "Profit"}">${profitCell}</td>
-    <td class="num ${pend || c.pct == null ? "" : c.pct >= 0 ? "pos" : "neg"}" data-label="${pend ? "% potencial" : "%"}">${pctCell}</td>
     <td data-label="">
       <div class="acciones">
         <div class="acc-left">
@@ -568,8 +577,8 @@ function cardPartido(p) {
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
         <thead><tr>
-          <th>Cajera</th><th>Estado</th><th class="num">Ingresado</th>
-          <th class="num">Premio</th><th class="num">Profit</th><th class="num">%</th><th></th>
+          <th>Cajera</th><th>Estado</th><th>Resultado / Cuota</th><th class="num">Ingresado</th>
+          <th class="num">Premio</th><th class="num">Profit</th><th></th>
         </tr></thead>
         <tbody>${filas || `<tr><td colspan="7" class="muted">Sin apuestas. Agregá la primera.</td></tr>`}</tbody>
       </table>
