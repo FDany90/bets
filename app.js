@@ -24,6 +24,7 @@ const state = {
   partidosById: {},   // id -> partido
   movimientos: [],    // {id, cajera_id, tipo, monto, bono_pct, nota, creado_en}
   apuestas: [],       // {id, partido_id, cajera, premio_cobrado, notas, lineas:[...], _partido}
+  partidosExpandidos: new Set(), // ids de partidos desplegados (muestran sus apuestas)
   pagina: 1,          // paginado del listado de partidos
   filtroEstado: "Pendiente",  // estado de partido ("" = todos | "Pendiente" | "Finalizado")
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
@@ -172,17 +173,19 @@ function balancePartido(p) {
   }).sort((a, b) => b.profit - a.profit);
 }
 
-// Bono estimado generado por un partido (informativo): apostado en cada casa × su bono %.
-// NO se suma al profit total (eso se cuenta con el bono real de las cargas).
+// Bono estimado contenido en una apuesta: por línea, el bono ya incluido en el
+// monto apostado se "saca de adentro": monto × bp/(100+bp) (bp = bono% de la casa).
+function bonoEstimadoApuesta(a) {
+  return (a.lineas || []).reduce((s, l) => {
+    const casa = state.casas.find((x) => x.nombre === l.casa);
+    const bp = casa ? num(casa.bono_pct) : 0;
+    return s + (bp > 0 ? num(l.monto_cargado) * bp / (100 + bp) : 0);
+  }, 0);
+}
+
+// Bono estimado generado por un partido (suma de sus apuestas)
 function bonoEstimadoPartido(p) {
-  return apuestasDePartido(p.id)
-    .flatMap((a) => a.lineas || [])
-    .reduce((s, l) => {
-      const casa = state.casas.find((x) => x.nombre === l.casa);
-      const bp = casa ? num(casa.bono_pct) : 0;
-      // el monto apostado YA incluye el bono → se "saca de adentro": monto × bp/(100+bp)
-      return s + (bp > 0 ? num(l.monto_cargado) * bp / (100 + bp) : 0);
-    }, 0);
+  return apuestasDePartido(p.id).reduce((s, a) => s + bonoEstimadoApuesta(a), 0);
 }
 
 // HTML del balance por resultado (solo partidos pendientes con resultados cargados)
@@ -365,7 +368,9 @@ function renderReporteResultados() {
   resueltas.forEach((x) => {
     const fecha = apuestaFecha(x.a);
     const k = fecha ? fecha.slice(0, 7) : "sin fecha";
-    (porMes[k] ||= { profit: 0, n: 0 }); porMes[k].profit += x.c.profit; porMes[k].n++;
+    (porMes[k] ||= { profit: 0, n: 0 });
+    porMes[k].profit += x.c.profit + bonoEstimadoApuesta(x.a); // profit + bono estimado
+    porMes[k].n++;
   });
   const porCajera = {};
   resueltas.forEach((x) => {
@@ -391,28 +396,15 @@ function renderReporteResultados() {
   const pendientes = calc.filter((x) => x.c.estado === "Pendiente");
   const pendientesTotal = pendientes.reduce((s, x) => s + x.c.ingresado, 0);
 
-  // Ganancia por bono REAL: bono de las cargas (respeta período + cajera del filtro)
-  const f = state.filtroRep;
-  const { desde, hasta } = rangoReporte();
-  const cajerasById = {};
-  state.cajeras.forEach((c) => { cajerasById[c.id] = c; });
-  const bonoGanado = state.movimientos
-    .filter((m) => m.tipo === "Carga")
-    .filter((m) => {
-      const fecha = (m.creado_en || "").slice(0, 10);
-      if (desde && fecha < desde) return false;
-      if (hasta && fecha > hasta) return false;
-      if (f.cajera) { const c = cajerasById[m.cajera_id]; if (!c || c.nombre !== f.cajera) return false; }
-      return true;
-    })
-    .reduce((s, m) => s + num(m.monto) * num(m.bono_pct) / 100, 0);
+  // Profit total = suma de "profit + bono estimado" de los partidos finalizados
+  // (apuestas resueltas). El bono es el estimado contenido en lo apostado.
+  const bonoGanado = resueltas.reduce((s, x) => s + bonoEstimadoApuesta(x.a), 0);
   const profitConBono = profitTotal + bonoGanado;
 
   const sinDatos = lista.length === 0;
   $("#rep-results").innerHTML = `
     <div class="kpis">
       <div class="kpi"><div class="label">Profit total</div><div class="value ${profitConBono >= 0 ? "pos" : "neg"}">${money(profitConBono)}</div></div>
-      <div class="kpi"><div class="label">Ganancia por bono</div><div class="value pos">${money(bonoGanado)}</div></div>
       <div class="kpi"><div class="label">Transferencia recibido</div><div class="value pos">${money(transferencia)}</div></div>
       <div class="kpi"><div class="label">Total ingresado</div><div class="value">${money(ingresadoTotal)}</div></div>
       <div class="kpi"><div class="label">Total saldo cajeras actual</div><div class="value ${saldoCajeras >= 0 ? "pos" : "neg"}">${money(saldoCajeras)}</div></div>
@@ -539,12 +531,14 @@ function cardPartido(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
   const bonoEst = bonoEstimadoPartido(p);
+  const abierto = state.partidosExpandidos.has(p.id);
   const filas = cp.aps.map(filaApuesta).join("");
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
 
   return `<div class="card partido">
     <div class="partido-head">
       <div class="partido-info">
+        <button type="button" class="btn-ghost btn-sm partido-toggle" data-toggle-partido="${p.id}" title="${abierto ? "Colapsar" : "Desplegar"}">${abierto ? "▾" : "▸"}</button>
         <h2 style="margin:0">${esc(p.nombre)}</h2>
         ${fechaTxt ? `<span class="muted">${esc(fechaTxt)}</span>` : ""}
         <span class="badge ${est}">${est}</span>
@@ -569,6 +563,7 @@ function cardPartido(p) {
       ${bonoEst > 0 ? `<span>Bono estimado: <b class="pos">${money(bonoEst)}</b></span>` : ""}
       ${cp.profitDef && bonoEst > 0 ? `<span>Profit + bono (est.): <b class="pos">${money(cp.profit + bonoEst)}</b></span>` : ""}
     </div>
+    ${abierto ? `
     ${balanceHtml(p, est)}
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
@@ -580,6 +575,7 @@ function cardPartido(p) {
       </table>
     </div>
     <button class="btn-ghost btn-sm" data-add-apuesta="${p.id}" style="margin-top:10px">+ Agregar apuesta</button>
+    ` : ""}
   </div>`;
 }
 
@@ -590,6 +586,12 @@ function bindPartidos() {
   $$("[data-del-partido]").forEach((b) => b.addEventListener("click", () => borrarPartido(b.dataset.delPartido)));
   $$("[data-resolver-partido]").forEach((b) => b.addEventListener("click", () =>
     abrirResolverPartido(state.partidosById[b.dataset.resolverPartido])));
+  $$("[data-toggle-partido]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.togglePartido;
+    if (state.partidosExpandidos.has(id)) state.partidosExpandidos.delete(id);
+    else state.partidosExpandidos.add(id);
+    render();
+  }));
   $$("[data-add-apuesta]").forEach((b) => b.addEventListener("click", () => abrirModal(null, b.dataset.addApuesta)));
 
   $$("[data-edit]").forEach((b) => b.addEventListener("click", () =>
@@ -1347,6 +1349,7 @@ function abrirMovimientos(c) {
   state.movimientos.filter((m) => m.cajera_id === c.id).forEach((m) => {
     const bonoTxt = m.tipo === "Carga" && num(m.bono_pct) > 0 ? `bono ${num(m.bono_pct)}%` : "";
     items.push({
+      id: m.id, // manual → se puede borrar
       fecha: m.creado_en,
       tipo: m.tipo,
       detalle: [m.casa, bonoTxt, m.nota].filter(Boolean).join(" · "),
@@ -1367,6 +1370,7 @@ function abrirMovimientos(c) {
     <td>${esc(it.tipo)}</td>
     <td>${esc(it.detalle || "—")}</td>
     <td class="num ${it.efecto >= 0 ? "pos" : "neg"}">${it.efecto >= 0 ? "+" : ""}${money(it.efecto)}</td>
+    <td>${it.id ? `<button type="button" class="btn-danger btn-sm" data-del-mov="${it.id}" title="Borrar movimiento">🗑️</button>` : ""}</td>
   </tr>`).join("");
 
   const dlg = document.createElement("dialog");
@@ -1378,9 +1382,10 @@ function abrirMovimientos(c) {
       </div>
       <div class="modal-body">
         <div class="tbl-wrap"><table>
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="num">Monto</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" class="muted">Sin movimientos.</td></tr>`}</tbody>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="num">Monto</th><th></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" class="muted">Sin movimientos.</td></tr>`}</tbody>
         </table></div>
+        <p class="muted" style="margin:10px 0 0">Solo se pueden borrar Cargas y Retiros. Apuesta/Premio salen de las apuestas.</p>
       </div>
       <div class="modal-foot">
         <button type="submit" class="btn-primary">Cerrar</button>
@@ -1391,6 +1396,18 @@ function abrirMovimientos(c) {
   const cerrar = () => { dlg.close(); dlg.remove(); };
   $("#m-cerrar", dlg).addEventListener("click", cerrar);
   $("#form-movs", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
+  $$("[data-del-mov]", dlg).forEach((b) => b.addEventListener("click", () => borrarMovimiento(b.dataset.delMov, c.id, dlg)));
+}
+
+async function borrarMovimiento(id, cajeraId, dlg) {
+  if (!confirm("¿Borrar este movimiento? El saldo se recalcula.")) return;
+  const { error } = await sb.from("movimientos").delete().eq("id", id);
+  if (error) { alert("Error: " + error.message); return; }
+  await cargarTodo();
+  render();
+  dlg.close(); dlg.remove();
+  const c = state.cajeras.find((x) => x.id === cajeraId);
+  if (c) abrirMovimientos(c); // reabrir con datos frescos
 }
 
 async function guardarMovimiento(payload) {
