@@ -24,7 +24,7 @@ const state = {
   partidosById: {},   // id -> partido
   movimientos: [],    // {id, cajera_id, tipo, monto, bono_pct, nota, creado_en}
   apuestas: [],       // {id, partido_id, cajera, premio_cobrado, notas, lineas:[...], _partido}
-  partidosExpandidos: new Set(), // ids de partidos desplegados (muestran sus apuestas)
+  partidosColapsados: new Set(), // ids de partidos colapsados (por defecto van desplegados)
   pagina: 1,          // paginado del listado de partidos
   filtroEstado: "Pendiente",  // estado de partido ("" = todos | "Pendiente" | "Finalizado")
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
@@ -406,10 +406,24 @@ function renderReporteResultados() {
   const pendientes = calc.filter((x) => x.c.estado === "Pendiente");
   const pendientesTotal = pendientes.reduce((s, x) => s + x.c.ingresado, 0);
 
-  // Profit total = suma de "profit + bono estimado" de los partidos finalizados
-  // (apuestas resueltas). El bono es el estimado contenido en lo apostado.
+  // Profit total = "profit + bono estimado" de las apuestas resueltas + ganancias manuales
   const bonoGanado = resueltas.reduce((s, x) => s + bonoEstimadoApuesta(x.a), 0);
-  const profitConBono = profitTotal + bonoGanado;
+  // Ganancias cargadas a mano (no mueven saldo; cuentan como profit). Respeta período + cajera.
+  const f = state.filtroRep;
+  const { desde, hasta } = rangoReporte();
+  const cajById = {};
+  state.cajeras.forEach((c) => { cajById[c.id] = c; });
+  const gananciaManual = state.movimientos
+    .filter((m) => m.tipo === "Ganancia")
+    .filter((m) => {
+      const fecha = (m.creado_en || "").slice(0, 10);
+      if (desde && fecha < desde) return false;
+      if (hasta && fecha > hasta) return false;
+      if (f.cajera) { const c = cajById[m.cajera_id]; if (!c || c.nombre !== f.cajera) return false; }
+      return true;
+    })
+    .reduce((s, m) => s + num(m.monto), 0);
+  const profitConBono = profitTotal + bonoGanado + gananciaManual;
 
   const sinDatos = lista.length === 0;
   $("#rep-results").innerHTML = `
@@ -540,7 +554,7 @@ function cardPartido(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
   const bonoEst = bonoEstimadoPartido(p);
-  const abierto = state.partidosExpandidos.has(p.id);
+  const abierto = !state.partidosColapsados.has(p.id);
   const filas = cp.aps.map(filaApuesta).join("");
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
 
@@ -597,8 +611,8 @@ function bindPartidos() {
     abrirResolverPartido(state.partidosById[b.dataset.resolverPartido])));
   $$("[data-toggle-partido]").forEach((b) => b.addEventListener("click", () => {
     const id = b.dataset.togglePartido;
-    if (state.partidosExpandidos.has(id)) state.partidosExpandidos.delete(id);
-    else state.partidosExpandidos.add(id);
+    if (state.partidosColapsados.has(id)) state.partidosColapsados.delete(id);
+    else state.partidosColapsados.add(id);
     render();
   }));
   $$("[data-add-apuesta]").forEach((b) => b.addEventListener("click", () => abrirModal(null, b.dataset.addApuesta)));
@@ -1162,6 +1176,7 @@ function viewCajeras() {
         <div class="acc-right">
           <button class="btn-primary btn-sm" data-cargar="${c.id}">💵 Cargar</button>
           <button class="btn-ghost btn-sm" data-retirar="${c.id}">🏧 Retirar</button>
+          <button class="btn-ghost btn-sm" data-ganancia="${c.id}">💰 Ganancia</button>
           <button class="btn-ghost btn-sm" data-movs="${c.id}">📜 Movimientos</button>
         </div>
       </div>
@@ -1181,6 +1196,7 @@ function viewCajeras() {
   return `<div class="toolbar">
       <button class="btn-primary" id="cargar-saldo">💵 Cargar saldo</button>
       <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
+      <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
       <div class="spacer"></div>
       <span class="muted">${state.cajeras.length} cajera(s)</span>
     </div>${cards}`;
@@ -1190,6 +1206,8 @@ function bindCajeras() {
   const byId = (id) => state.cajeras.find((c) => c.id === id);
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
+  $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
+  $$("[data-ganancia]").forEach((b) => b.addEventListener("click", () => abrirGanancia(byId(b.dataset.ganancia))));
   $$("[data-cargar]").forEach((b) => b.addEventListener("click", () => abrirCargar(byId(b.dataset.cargar))));
   $$("[data-retirar]").forEach((b) => b.addEventListener("click", () => abrirRetirar(byId(b.dataset.retirar))));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
@@ -1351,18 +1369,66 @@ function abrirRetirar(cajeraFija) {
   });
 }
 
+// Ganancia manual: cuenta como profit en el reporte, NO mueve el saldo.
+function abrirGanancia(cajeraFija) {
+  if (!state.cajeras.length) { alert("No hay cajeras. Agregá una en Configuración."); return; }
+  const seleccionable = !cajeraFija;
+  const cajeraOpts = state.cajeras
+    .map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join("");
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-ganancia">
+      <div class="modal-head">
+        <h2 style="margin:0">💰 Cargar ganancia</h2>
+        <button type="button" class="btn-ghost btn-sm" id="g-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted" style="margin:0 0 10px">Suma al <b>profit</b> del reporte. <b>No</b> mueve el saldo (el dinero entra/sale por cargas y retiros).</p>
+        <div class="grid grid-2">
+          <div><label>Cajera</label>${seleccionable
+            ? `<select name="cajera_id">${cajeraOpts}</select>`
+            : `<input value="${esc(cajeraFija.nombre)}" disabled />`}</div>
+          <div><label>Ganancia</label><input type="number" step="any" name="monto" placeholder="50000" required autofocus /></div>
+        </div>
+        <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Bono retirado sin apostar" /></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="g-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Cargar ganancia</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  const f = $("#form-ganancia", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#g-cerrar", dlg).addEventListener("click", cerrar);
+  $("#g-cancelar", dlg).addEventListener("click", cerrar);
+
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const c = seleccionable ? state.cajeras.find((x) => x.id === f.cajera_id.value) : cajeraFija;
+    if (!c) { alert("Elegí una cajera."); return; }
+    const payload = { cajera_id: c.id, tipo: "Ganancia", monto: num(f.monto.value), bono_pct: 0, casa: null, nota: f.nota.value.trim() || null };
+    guardarMovimiento(payload).then((ok) => { if (ok) cerrar(); });
+  });
+}
+
 function abrirMovimientos(c) {
   if (!c) return;
   // Movimientos manuales (cargas/retiros) + efectos derivados de las apuestas
   const items = [];
   state.movimientos.filter((m) => m.cajera_id === c.id).forEach((m) => {
     const bonoTxt = m.tipo === "Carga" && num(m.bono_pct) > 0 ? `bono ${num(m.bono_pct)}%` : "";
+    const extra = m.tipo === "Ganancia" ? "no afecta saldo" : "";
     items.push({
       id: m.id, // manual → se puede borrar
       fecha: m.creado_en,
       tipo: m.tipo,
-      detalle: [m.casa, bonoTxt, m.nota].filter(Boolean).join(" · "),
-      efecto: efectoMovimiento(m),
+      detalle: [m.casa, bonoTxt, m.nota, extra].filter(Boolean).join(" · "),
+      // Ganancia: muestra su monto (informativo); el saldo no cambia
+      efecto: m.tipo === "Ganancia" ? num(m.monto) : efectoMovimiento(m),
     });
   });
   state.apuestas.filter((a) => a.cajera === c.nombre).forEach((a) => {
