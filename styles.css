@@ -59,8 +59,14 @@ button, .tab, .chip-f, .chip button, a, [tabindex] { touch-action: manipulation;
 
 /* ---------- Header / Tabs ---------- */
 header {
+  position: sticky; top: 0; z-index: 100;
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+  padding: 12px 16px;
+  background: rgba(6, 9, 14, 0.72);
+  -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm), var(--hi);
 }
 header h1 { font-size: 23px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
 .header-top { display: flex; flex-direction: column; gap: 2px; }
@@ -81,6 +87,8 @@ header h1 { font-size: 23px; letter-spacing: -0.02em; display: flex; align-items
   background: linear-gradient(160deg, rgba(46, 160, 67, 0.20), rgba(46, 160, 67, 0.06));
   box-shadow: 0 2px 14px var(--accent-glow);
 }
+/* Tab solo-ícono (Configuración): más compacto */
+.tab-icon { padding: 8px 11px; font-size: 16px; line-height: 1; }
 
 /* ---------- Cards ---------- */
 .card {
