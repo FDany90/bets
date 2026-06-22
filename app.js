@@ -413,11 +413,27 @@ function fechaHora(ms) {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Tiempo transcurrido en texto: "recién", "Hace 5 minutos", "Hace 1 hora",
+// "Hace 1 día 5 horas". Para días incluye las horas restantes.
+function tiempoRelativo(ms) {
+  if (!ms) return "";
+  const min = Math.floor((Date.now() - ms) / 60000);
+  if (min < 1) return "recién";
+  if (min < 60) return `Hace ${min} ${min === 1 ? "minuto" : "minutos"}`;
+  const horas = Math.floor(min / 60);
+  if (horas < 24) return `Hace ${horas} ${horas === 1 ? "hora" : "horas"}`;
+  const dias = Math.floor(horas / 24);
+  const horasResto = horas % 24;
+  let s = `Hace ${dias} ${dias === 1 ? "día" : "días"}`;
+  if (horasResto > 0) s += ` ${horasResto} ${horasResto === 1 ? "hora" : "horas"}`;
+  return s;
+}
+
 function actualizarUltimaAct() {
   const el = $("#ultima-act");
   if (!el) return;
   const ms = ultimaActualizacionGlobal();
-  el.innerHTML = ms ? `Última actualización: <b>${fechaHora(ms)}</b>` : "";
+  el.innerHTML = ms ? `Última actualización: <b>${fechaHora(ms)}</b> · ${tiempoRelativo(ms)}` : "";
 }
 
 // ============================================================
@@ -1852,3 +1868,6 @@ document.addEventListener("submit", (e) => {
   render();
   if (sb) { await cargarTodo(); render(); }
 })();
+
+// Mantiene fresco el "Hace X" de la última actualización sin re-renderizar todo.
+setInterval(actualizarUltimaAct, 60000);
