@@ -356,6 +356,8 @@ dialog[open] { animation: dialog-in .18s ease-out; }
   /* Última celda (acciones) sin borde y a la derecha */
   .apuestas-tbl td:last-child { border-bottom: none; padding-top: 12px; justify-content: flex-end; }
   .apuestas-tbl td:last-child::before { content: ""; display: none; }
+  /* Profit vacío (apuesta pendiente): no mostrar la fila "PROFIT —" */
+  .apuestas-tbl td.empty-cell { display: none; }
 }
 
 /* Respeta la preferencia de menos movimiento (accesibilidad) */

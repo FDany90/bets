@@ -723,7 +723,7 @@ function filaApuesta(a) {
   const pend = c.estado === "Pendiente";
   const pot = pend ? potencialPorCasa(a) : [];
   const premioCell = pend ? potListHtml(pot, "premio") : money(c.premio);
-  const profitCell = pend ? "—" : (c.profit == null ? "—" : money(c.profit));
+  const profitCell = pend ? "" : (c.profit == null ? "—" : money(c.profit));
   // Saldo actual de la cajera (chico y gris), junto al nombre
   const cajObj = state.cajeras.find((x) => x.nombre === a.cajera);
   const saldoTxt = cajObj
@@ -734,7 +734,7 @@ function filaApuesta(a) {
     <td data-label="Resultado / Cuota">${lineasApuestaHtml(a)}</td>
     <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
     <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>
-    <td class="num ${pend || c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="Profit">${profitCell}</td>
+    <td class="num ${pend ? "empty-cell" : c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="Profit">${profitCell}</td>
     <td data-label="">
       <div class="acciones">
         <div class="acc-left">
