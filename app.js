@@ -45,6 +45,26 @@ const fmtHora = (h) => {
   if (!t) return "";
   return /hs/i.test(t) ? t : `${t} hs`;
 };
+// Convierte una hora de texto libre ("13 hs", "13:30", "9.45") a minutos del día.
+// Devuelve null si no hay un número de hora reconocible (esos van al final al ordenar).
+const horaAMinutos = (h) => {
+  const m = String(h ?? "").trim().match(/(\d{1,2})\s*(?::|\.|h|hs)?\s*(\d{2})?/i);
+  if (!m) return null;
+  const hh = parseInt(m[1], 10);
+  if (isNaN(hh)) return null;
+  return hh * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+};
+// Orden de partidos: por fecha ascendente (el más próximo primero) y luego por
+// hora ascendente. Los que no tienen fecha/hora van al final.
+const ordenarPartidos = (arr) => [...arr].sort((a, b) => {
+  const fa = a.fecha || "", fb = b.fecha || "";
+  if (fa !== fb) return !fa ? 1 : !fb ? -1 : (fa < fb ? -1 : 1);
+  const ha = horaAMinutos(a.hora), hb = horaAMinutos(b.hora);
+  if (ha == null && hb == null) return 0;
+  if (ha == null) return 1;
+  if (hb == null) return -1;
+  return ha - hb;
+});
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -285,9 +305,53 @@ function resumenCajera(c) {
   return { saldo, cargado, retirado, apostado, ganado, nApuestas: aps.length };
 }
 
+// Última actividad de una cajera (ms): lo más reciente entre sus movimientos
+// (cargas/retiros/ganancias) y sus apuestas. 0 si nunca tuvo movimiento.
+function ultimaActividadCajera(c) {
+  let max = 0;
+  const considerar = (fecha) => {
+    const t = fecha ? Date.parse(fecha) : NaN;
+    if (!isNaN(t) && t > max) max = t;
+  };
+  state.movimientos.forEach((m) => { if (m.cajera_id === c.id) considerar(m.creado_en); });
+  state.apuestas.forEach((a) => { if (a.cajera === c.nombre) considerar(a.creado_en); });
+  return max;
+}
+
+// Partidos pendientes (sin resolver) en los que la cajera tiene plata apostada.
+// Devuelve [{partido, monto}] con el monto actual apostado en ese partido (líneas con cajera).
+function partidosPendientesCajera(c) {
+  const map = new Map();
+  state.apuestas
+    .filter((a) => a.cajera === c.nombre && a._partido && !a._partido.resultado_ganador)
+    .forEach((a) => {
+      const monto = debitoCajera(a);
+      if (monto <= 0) return;
+      const p = a._partido;
+      const cur = map.get(p.id) || { partido: p, monto: 0 };
+      cur.monto += monto;
+      map.set(p.id, cur);
+    });
+  return [...map.values()].sort((a, b) => b.monto - a.monto);
+}
+
+// ---------- Indicador de carga / feedback ----------
+// Contador de operaciones en curso: muestra la barra de progreso global y
+// el cursor "busy" mientras haya alguna acción pendiente (red).
+let _busy = 0;
+let _tmpSeq = 0; // ids temporales para filas optimistas
+function setBusy(on) {
+  _busy = Math.max(0, _busy + (on ? 1 : -1));
+  const activo = _busy > 0;
+  document.body.classList.toggle("busy", activo);
+  $("#progress")?.classList.toggle("on", activo);
+}
+
 // ---------- Carga de datos ----------
 async function cargarTodo() {
   if (!sb) return;
+  setBusy(true);
+  try {
   const [casas, cajeras, partidos, movimientos, retiros, apuestas, lineas] = await Promise.all([
     sb.from("casas").select("*").order("nombre"),
     sb.from("cajeras").select("*").order("nombre"),
@@ -317,10 +381,43 @@ async function cargarTodo() {
     lineas: porApuesta[a.id] || [],
     _partido: state.partidosById[a.partido_id] || null,
   }));
+  } finally {
+    setBusy(false);
+  }
 }
 
 function mostrarError(msg) {
   $("#banner").innerHTML = `<div class="banner" style="border-color:var(--danger);background:#3a1414;color:#f8a9a4;">⚠️ ${esc(msg)}</div>`;
+}
+
+// Última actualización global (ms): el creado_en más reciente entre todos los
+// registros que cambian (apuestas, movimientos, partidos, retiros). 0 si no hay datos.
+function ultimaActualizacionGlobal() {
+  let max = 0;
+  const considerar = (fecha) => {
+    const t = fecha ? Date.parse(fecha) : NaN;
+    if (!isNaN(t) && t > max) max = t;
+  };
+  state.apuestas.forEach((a) => considerar(a.creado_en));
+  state.movimientos.forEach((m) => considerar(m.creado_en));
+  state.partidos.forEach((p) => considerar(p.creado_en));
+  state.retirosGanancia.forEach((r) => considerar(r.creado_en));
+  return max;
+}
+
+// Formatea un timestamp (ms) como "dd/mm/aaaa HH:MM"
+function fechaHora(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function actualizarUltimaAct() {
+  const el = $("#ultima-act");
+  if (!el) return;
+  const ms = ultimaActualizacionGlobal();
+  el.innerHTML = ms ? `Última actualización: <b>${fechaHora(ms)}</b>` : "";
 }
 
 // ============================================================
@@ -331,12 +428,17 @@ function render() {
   if (!CONFIGURADO) {
     $("#banner").innerHTML = `<div class="banner">⚙️ Falta conectar la base de datos. Abrí <b>config.js</b> y pegá tu URL y anon key de Supabase. Mirá <b>README.md</b> para los pasos.</div>`;
   }
+  actualizarUltimaAct();
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === state.tab));
   const v = $("#view");
   if (state.tab === "reportes") { v.innerHTML = viewReportes(); bindReportes(); }
   else if (state.tab === "partidos") { v.innerHTML = viewPartidos(); bindPartidos(); }
   else if (state.tab === "cajeras") { v.innerHTML = viewCajeras(); bindCajeras(); }
   else if (state.tab === "config") { v.innerHTML = viewConfig(); bindConfig(); }
+  // Re-dispara el fade del contenido (cambio de tab/página/datos)
+  v.classList.remove("fade-in");
+  void v.offsetWidth;
+  v.classList.add("fade-in");
 }
 
 // ============================================================
@@ -443,8 +545,8 @@ function renderReporteResultados() {
       <button class="btn-ghost btn-sm" id="ver-retiros">📜 Retiros (${state.retirosGanancia.length})</button>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="label">Profit total histórico</div><div class="value ${profitConBono >= 0 ? "pos" : "neg"}">${money(profitConBono)}</div></div>
       <div class="kpi"><div class="label">Profit total actual</div><div class="value ${profitActual >= 0 ? "pos" : "neg"}">${money(profitActual)}</div></div>
+      <div class="kpi"><div class="label">Profit total histórico</div><div class="value ${profitConBono >= 0 ? "pos" : "neg"}">${money(profitConBono)}</div></div>
       <div class="kpi"><div class="label">Transferencia recibido</div><div class="value pos">${money(transferencia)}</div></div>
       <div class="kpi"><div class="label">Total ingresado</div><div class="value">${money(ingresadoTotal)}</div></div>
       <div class="kpi"><div class="label">Total saldo cajeras actual</div><div class="value ${saldoCajeras >= 0 ? "pos" : "neg"}">${money(saldoCajeras)}</div></div>
@@ -577,9 +679,9 @@ function viewPartidos() {
   const cont = { "": state.partidos.length, Pendiente: 0, Finalizado: 0 };
   state.partidos.forEach((p) => { cont[estadoPartido(p)]++; });
 
-  const lista = state.filtroEstado
+  const lista = ordenarPartidos(state.filtroEstado
     ? state.partidos.filter((p) => estadoPartido(p) === state.filtroEstado)
-    : state.partidos;
+    : state.partidos);
 
   const total = lista.length;
   const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -655,7 +757,7 @@ function cardPartido(p) {
   return `<div class="card partido">
     <div class="partido-head">
       <div class="partido-info">
-        <button type="button" class="btn-ghost btn-sm partido-toggle" data-toggle-partido="${p.id}" title="${abierto ? "Colapsar" : "Desplegar"}">${abierto ? "▾" : "▸"}</button>
+        <button type="button" class="btn-ghost partido-toggle" data-toggle-partido="${p.id}" title="${abierto ? "Colapsar" : "Desplegar"}">${abierto ? "▾ Menos" : "▸ Más"}</button>
         <h2 style="margin:0">${esc(p.nombre)}</h2>
         ${fechaTxt ? `<span class="muted">${esc(fechaTxt)}</span>` : ""}
         <span class="badge ${est}">${est}</span>
@@ -682,6 +784,7 @@ function cardPartido(p) {
     </div>
     ${abierto ? `
     ${balanceHtml(p, est)}
+    <button class="btn-primary add-apuesta-btn" data-add-apuesta="${p.id}">+ Agregar apuesta</button>
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
         <thead><tr>
@@ -691,7 +794,6 @@ function cardPartido(p) {
         <tbody>${filas || `<tr><td colspan="7" class="muted">Sin apuestas. Agregá la primera.</td></tr>`}</tbody>
       </table>
     </div>
-    <button class="btn-ghost btn-sm" data-add-apuesta="${p.id}" style="margin-top:10px">+ Agregar apuesta</button>
     ` : ""}
   </div>`;
 }
@@ -1261,9 +1363,15 @@ function viewCajeras() {
     return `<div class="card"><p class="muted">No hay cajeras todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
   }
 
-  const cards = state.cajeras.map((c) => {
+  // Orden: las cajeras con actividad más reciente (carga/apuesta) primero;
+  // las que no tuvieron nada recientemente quedan al final.
+  const ordenadas = [...state.cajeras].sort((a, b) => ultimaActividadCajera(b) - ultimaActividadCajera(a));
+
+  const cards = ordenadas.map((c) => {
     const r = resumenCajera(c);
     const casa = casaDeCajera(c);
+    const pend = partidosPendientesCajera(c);
+    const apostadoPend = pend.reduce((s, x) => s + x.monto, 0);
     return `<div class="card cajera">
       <div class="cajera-head">
         <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
@@ -1279,10 +1387,16 @@ function viewCajeras() {
         <span class="value ${r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
       </div>
       <div class="cajera-desglose">
-        <span>Cargado <b>${money(r.cargado)}</b></span>
-        <span>Apostado <b>${money(r.apostado)}</b></span>
-        <span>Ganado <b>${money(r.ganado)}</b></span>
-        <span>Retirado <b>${money(r.retirado)}</b></span>
+        <span>Apostado (pendiente) <b>${money(apostadoPend)}</b></span>
+      </div>
+      <div class="cajera-pendientes">
+        <span class="label">Partidos pendientes</span>
+        ${pend.length
+          ? pend.map((x) => `<div class="pend-item">
+              <span class="pend-nombre">${esc(x.partido.nombre)}${x.partido.fecha ? ` <span class="muted">· ${esc(x.partido.fecha)}</span>` : ""}</span>
+              <b>${money(x.monto)}</b>
+            </div>`).join("")
+          : `<span class="muted" style="font-size:13px">Sin apuestas pendientes</span>`}
       </div>
     </div>`;
   }).join("");
@@ -1392,7 +1506,7 @@ function abrirCargar(cajeraFija) {
       casa: casa ? casa.nombre : null,
       nota: f.nota.value.trim() || null,
     };
-    guardarMovimiento(payload).then((ok) => { if (ok) cerrar(); });
+    if (guardarMovimiento(payload)) cerrar();
   });
 }
 
@@ -1459,7 +1573,7 @@ function abrirRetirar(cajeraFija) {
     const saldoActual = resumenCajera(c).saldo;
     if (monto > saldoActual && !confirm("El retiro supera el saldo disponible y lo deja negativo. ¿Continuar?")) return;
     const payload = { cajera_id: c.id, tipo: "Retiro", monto, bono_pct: 0, casa: null, nota: f.nota.value.trim() || null };
-    guardarMovimiento(payload).then((ok) => { if (ok) cerrar(); });
+    if (guardarMovimiento(payload)) cerrar();
   });
 }
 
@@ -1505,7 +1619,7 @@ function abrirGanancia(cajeraFija) {
     const c = seleccionable ? state.cajeras.find((x) => x.id === f.cajera_id.value) : cajeraFija;
     if (!c) { alert("Elegí una cajera."); return; }
     const payload = { cajera_id: c.id, tipo: "Ganancia", monto: num(f.monto.value), bono_pct: 0, casa: null, nota: f.nota.value.trim() || null };
-    guardarMovimiento(payload).then((ok) => { if (ok) cerrar(); });
+    if (guardarMovimiento(payload)) cerrar();
   });
 }
 
@@ -1570,22 +1684,52 @@ function abrirMovimientos(c) {
 
 async function borrarMovimiento(id, cajeraId, dlg) {
   if (!confirm("¿Borrar este movimiento? El saldo se recalcula.")) return;
-  const { error } = await sb.from("movimientos").delete().eq("id", id);
-  if (error) { alert("Error: " + error.message); return; }
-  await cargarTodo();
+  // Optimista: saco la fila y refresco al instante; el borrado real va atrás.
+  const backup = [...state.movimientos];
+  state.movimientos = state.movimientos.filter((m) => m.id !== id);
   render();
   dlg.close(); dlg.remove();
   const c = state.cajeras.find((x) => x.id === cajeraId);
-  if (c) abrirMovimientos(c); // reabrir con datos frescos
+  if (c) abrirMovimientos(c); // reabrir ya sin la fila
+
+  setBusy(true);
+  const { error } = await sb.from("movimientos").delete().eq("id", id);
+  setBusy(false);
+  if (error) {
+    state.movimientos = backup; // revierte
+    render();
+    mostrarError("No se pudo borrar el movimiento: " + error.message);
+  }
 }
 
-async function guardarMovimiento(payload) {
+// Guarda un movimiento con actualización OPTIMISTA: valida, agrega la fila al
+// estado y refresca la UI al instante (el popup se cierra enseguida); la inserción
+// real va en segundo plano. Si el servidor la rechaza, revierte y avisa.
+// Devuelve true si pasó la validación (para que el modal se cierre).
+function guardarMovimiento(payload) {
   if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
   if (!(num(payload.monto) > 0)) { alert("Ingresá un monto mayor a 0."); return false; }
-  const { error } = await sb.from("movimientos").insert(payload);
-  if (error) { alert("Error: " + error.message); return false; }
-  await cargarTodo();
+
+  // Fila optimista (con id temporal) para ver el cambio ya.
+  const tempId = "tmp-" + (++_tmpSeq);
+  state.movimientos.unshift({ ...payload, id: tempId, creado_en: new Date().toISOString() });
   render();
+
+  // Persiste en segundo plano y reconcilia.
+  setBusy(true);
+  sb.from("movimientos").insert(payload).select().single()
+    .then(({ data, error }) => {
+      const i = state.movimientos.findIndex((m) => m.id === tempId);
+      if (error) {
+        if (i >= 0) state.movimientos.splice(i, 1); // revierte
+        mostrarError("No se pudo guardar el movimiento: " + error.message);
+      } else if (i >= 0) {
+        state.movimientos[i] = data; // reemplaza por la fila real (id definitivo)
+      }
+      render();
+    })
+    .finally(() => setBusy(false));
+
   return true;
 }
 
@@ -1686,6 +1830,19 @@ function bindConfig() {
 //   ARRANQUE
 // ============================================================
 $$(".tab").forEach((t) => t.addEventListener("click", () => { state.tab = t.dataset.tab; render(); }));
+
+// Feedback inmediato al enviar un formulario dentro de un modal: el botón de
+// submit muestra spinner y se deshabilita mientras se guarda. Si el modal sigue
+// abierto (ej. error de validación), se reactiva solo a los pocos segundos.
+document.addEventListener("submit", (e) => {
+  const form = e.target;
+  if (!(form instanceof HTMLFormElement) || !form.closest("dialog")) return;
+  const btn = form.querySelector('button[type="submit"], button:not([type])');
+  if (!btn || btn.classList.contains("is-loading")) return;
+  btn.classList.add("is-loading");
+  btn.disabled = true;
+  setTimeout(() => { btn.classList.remove("is-loading"); btn.disabled = false; }, 6000);
+}, true);
 
 (async function init() {
   render();

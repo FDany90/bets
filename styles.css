@@ -31,6 +31,9 @@ header {
   flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
 }
 header h1 { font-size: 22px; display: flex; align-items: center; gap: 8px; }
+.header-top { display: flex; flex-direction: column; gap: 2px; }
+.last-update { font-size: 12px; color: var(--text-dim); }
+.last-update b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .tab {
   background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim);
@@ -69,7 +72,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 button {
   font-family: inherit; cursor: pointer; border: none; border-radius: 8px;
   padding: 9px 16px; font-size: 14px; font-weight: 600;
+  transition: transform .06s ease, background-color .15s ease, border-color .15s ease, opacity .15s ease;
 }
+button:active:not(:disabled) { transform: scale(.96); }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -78,6 +83,35 @@ button {
 .btn-danger:hover { background: var(--danger); color: #fff; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Botón en estado "guardando": spinner + texto atenuado */
+button.is-loading { position: relative; color: transparent !important; pointer-events: none; }
+button.is-loading::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+  animation: spin .6s linear infinite;
+}
+.btn-ghost.is-loading::after, .btn-danger.is-loading::after { border-color: rgba(230,237,243,.35); border-top-color: var(--text); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Barra de progreso global (indeterminada) durante operaciones de red */
+.progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 2000;
+  overflow: hidden; pointer-events: none; opacity: 0; transition: opacity .2s ease;
+}
+.progress.on { opacity: 1; }
+.progress::before {
+  content: ""; position: absolute; height: 100%; width: 35%; border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, transparent, var(--accent-hover), transparent);
+  animation: progress-slide 1s ease-in-out infinite;
+}
+@keyframes progress-slide { 0% { left: -35%; } 100% { left: 100%; } }
+body.busy { cursor: progress; }
+
+/* Aparición suave del contenido al cambiar de vista/página */
+#view.fade-in { animation: view-in .14s ease-out; }
+@keyframes view-in { from { opacity: .4; } to { opacity: 1; } }
 input:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ---------- Líneas (casas) ---------- */
@@ -120,8 +154,10 @@ tr:hover td { background: #1f2630; }
 .card.partido { padding-bottom: 16px; }
 .partido-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .partido-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.partido-toggle { padding: 2px 8px; font-size: 14px; line-height: 1; min-width: 0; }
+.partido-toggle { padding: 7px 14px; font-size: 15px; font-weight: 600; line-height: 1; min-width: 0; }
 .partido-head .acciones { width: auto; }
+/* Botón grande "Agregar apuesta", arriba de la tabla de apuestas */
+.add-apuesta-btn { margin: 12px 0; font-size: 15px; padding: 10px 18px; }
 .partido-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 12px; font-size: 13px; color: var(--text-dim); }
 .partido-meta b { color: var(--text); }
 .partido-meta b.pos { color: var(--accent-hover); }
@@ -138,6 +174,13 @@ tr:hover td { background: #1f2630; }
 .cajera-saldo .value { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cajera-desglose { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-dim); }
 .cajera-desglose b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Partidos pendientes dentro de la card de cajera */
+.cajera-pendientes { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.cajera-pendientes .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.pend-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
+.pend-item .pend-nombre { color: var(--text); }
+.pend-item b { color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* Fila de cajera en Configuración (nombre + casino + borrar) */
 .cajera-cfg { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
