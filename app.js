@@ -445,7 +445,7 @@ function render() {
     $("#banner").innerHTML = `<div class="banner">⚙️ Falta conectar la base de datos. Abrí <b>config.js</b> y pegá tu URL y anon key de Supabase. Mirá <b>README.md</b> para los pasos.</div>`;
   }
   actualizarUltimaAct();
-  $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === state.tab));
+  $$("[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === state.tab));
   const v = $("#view");
   if (state.tab === "reportes") { v.innerHTML = viewReportes(); bindReportes(); }
   else if (state.tab === "partidos") { v.innerHTML = viewPartidos(); bindPartidos(); }
@@ -1849,7 +1849,7 @@ function bindConfig() {
 // ============================================================
 //   ARRANQUE
 // ============================================================
-$$(".tab").forEach((t) => t.addEventListener("click", () => { state.tab = t.dataset.tab; render(); }));
+$$("[data-tab]").forEach((t) => t.addEventListener("click", () => { state.tab = t.dataset.tab; render(); }));
 
 // Feedback inmediato al enviar un formulario dentro de un modal: el botón de
 // submit muestra spinner y se deshabilita mientras se guarda. Si el modal sigue

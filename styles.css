@@ -47,7 +47,7 @@ body {
   background-attachment: fixed;
 }
 
-.container { max-width: 1100px; margin: 0 auto; padding: 18px 16px 40px; }
+.container { max-width: 1100px; margin: 0 auto; padding: 18px 16px calc(84px + env(safe-area-inset-bottom)); }
 
 /* Cualquier control interactivo: foco accesible y mejor respuesta táctil */
 button, .tab, .chip-f, .chip button, a, [tabindex] { touch-action: manipulation; }
@@ -63,8 +63,8 @@ header {
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
   padding: 12px 16px;
-  background: rgba(6, 9, 14, 0.72);
-  -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
+  background: rgba(6, 9, 14, 0.55);
+  -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: var(--shadow-sm), var(--hi);
 }
@@ -89,6 +89,33 @@ header h1 { font-size: 23px; letter-spacing: -0.02em; display: flex; align-items
 }
 /* Tab solo-ícono (Configuración): más compacto */
 .tab-icon { padding: 8px 11px; font-size: 16px; line-height: 1; }
+
+/* ---------- Barra de navegación inferior (bottom nav, estilo app) ---------- */
+.bottom-nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 200;
+  display: flex; justify-content: space-around; align-items: stretch; gap: 4px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  background: rgba(8, 12, 18, 0.45);
+  -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+  border-top: 1px solid var(--border);
+}
+.navbtn {
+  flex: 1 1 0; max-width: 140px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: transparent; border: 1px solid transparent; color: var(--text-dim);
+  padding: 7px 4px; border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease, transform .08s ease;
+}
+.navbtn-ico { font-size: 21px; line-height: 1; }
+.navbtn-lbl { line-height: 1; }
+.navbtn:hover { color: var(--text); }
+.navbtn:active { transform: scale(.93); }
+.navbtn.active {
+  color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.4);
+  background: linear-gradient(160deg, rgba(46, 160, 67, 0.20), rgba(46, 160, 67, 0.05));
+}
+.navbtn.active .navbtn-ico { filter: drop-shadow(0 0 7px var(--accent-glow)); }
 
 /* ---------- Cards ---------- */
 .card {
