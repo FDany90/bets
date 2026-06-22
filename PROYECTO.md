@@ -1,7 +1,7 @@
 # 📊 Proyecto Apuestas — Documentación
 
 > Documento de referencia con todo lo construido. Sirve para retomar el proyecto en el futuro (incluso tras borrar el chat de Claude).
-> Última actualización: 2026-06-05.
+> Última actualización: 2026-06-22.
 
 ---
 
@@ -28,6 +28,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-cajeras-saldo.sql` | Migración que creó la tabla `movimientos` (billetera por cajera) y `casas.tiene_cajeras` |
 | `migracion-bono-por-casa.sql` | Migración que agregó `movimientos.casa` (bono de depósito configurable por casa) |
 | `migracion-cajera-casa.sql` | Migración que agregó `cajeras.casa_id` (cada cajera pertenece a un casino) |
+| `migracion-retiros-ganancia.sql` | Migración que creó la tabla `retiros_ganancia` (reparto; baja el profit actual) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -56,6 +57,10 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - `id` uuid · `partido_id` uuid (FK → partidos, on delete cascade) · `cajera` text · `premio_cobrado` numeric (editable, override) · `notas` text · `creado_en`
 - Columnas legacy (ya no se usan, se pueden dropear): `partido`, `fecha`, `hora`, `estado`, `resultado_ganador`.
 - **Estado de la apuesta = derivado** (no se guarda): si el partido no tiene resultado → `Pendiente`; si lo tiene → `Cobrado` cuando hay premio (>0: alguna línea matchea el resultado del partido, o hay `premio_cobrado` manual), si no `Perdido`.
+
+**`retiros_ganancia`** — reparto de ganancias (no es por cajera)
+- `id` uuid · `monto` numeric · `nota` text · `creado_en`
+- **Profit total actual** = profit histórico − Σ retiros_ganancia. El histórico no se toca.
 
 **`lineas`** — las casas dentro de una apuesta
 - `id` uuid · `apuesta_id` uuid (FK, on delete cascade) · `casa` text · `monto_cargado` numeric (dinero real apostado) · `bono_pct` numeric (legacy, se guarda 0, ya no se usa) · `cuota` numeric · `resultado` text (qué resultado cubre) · `apuesta_gratis` numeric (NO cuenta como ingresado) · `orden` int
@@ -86,7 +91,7 @@ El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). S
 - El `max(0, …)` evita saldos negativos cuando se apuesta sin haber cargado dinero.
 
 ## 6. Funcionalidades implementadas
-- **Tab Reportes:** KPIs (**Profit total** = Σ de "profit + bono estimado" de las apuestas resueltas = suma de los partidos finalizados; Transferencia recibido = Σ premios cobrados, Total ingresado, **Total saldo cajeras actual** = Σ saldos de todas las cajeras, **Total en apuestas pendientes** = Σ ingresado de las pendientes, Apuestas resueltas, % promedio). Tablas: profit por mes (incluye bono estimado), por cajera (solo apuestas), dinero ingresado por casa. **Filtros:** período (Todo / Última semana / Último mes / Personalizado), cajera, rango de monto ingresado.
+- **Tab Reportes:** KPIs (**Profit total histórico** = Σ de "profit + bono estimado" de las apuestas resueltas + ganancias manuales; **Profit total actual** = histórico − Σ retiros de ganancia; Transferencia recibido = Σ premios cobrados, Total ingresado, **Total saldo cajeras actual**, **Total en apuestas pendientes**, Apuestas resueltas, % promedio). Botones **💸 Retirar ganancia** (reparto, baja el actual) y **📜 Retiros** (lista/borrar). Tablas: profit por mes (incluye bono estimado), por cajera (solo apuestas), dinero ingresado por casa. **Filtros:** período (Todo / Última semana / Último mes / Personalizado), cajera, rango de monto ingresado.
 - **Tab Partidos** (home por defecto): listado de **partidos** en tarjetas, cada una con sus apuestas anidadas. **Chips de filtro** por estado de partido (Pendientes/Finalizados/Todos) con conteo; arranca en **Pendientes**. **Paginado** de 10 partidos.
   - **Flujo:** `+ Nuevo partido` (nombre, fecha, hora) → dentro del partido `+ Agregar apuesta` (cajera, casas/líneas, premio override, notas) → cuando termina el partido, `✅ Resolver` una vez y todas sus apuestas se resuelven solas.
   - **Tarjeta de partido:** header (nombre · fecha/hora · badge Pendiente/Finalizado · resultado ganador), totales agregados (nº apuestas, ingresado, profit si está resuelto), botones 🗑️/✏️ y ✅ Resolver / ↩️ Cambiar resultado. **Desplegable** con chevron ▸/▾ (desplegada por defecto): el header y los totales quedan visibles; al colapsar oculta el balance, la tabla de apuestas y "+ Agregar apuesta".
@@ -102,12 +107,20 @@ El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). S
   - **🏧 Retirar:** monto + nota; avisa si deja el saldo negativo.
   - **💰 Ganancia (manual):** registra una ganancia (ej. bono retirado sin apostar). **Suma al profit del reporte** pero **NO mueve el saldo** (el dinero entra/sale por cargas/retiros). Movimiento `tipo='Ganancia'`.
   - **📜 Movimientos:** historial (cargas/retiros manuales + débitos "Apuesta" y créditos "Premio" derivados de las apuestas). Las **cargas/retiros se pueden borrar** con 🗑️ (recalcula el saldo); los derivados de apuestas no.
-- **Tab Configuración:** alta/baja de **casas** (nombre + **bono % al depositar** + checkbox "tiene cajeras" + checkbox "da apuesta gratis") y **cajeras** (nombre + **casino asociado**; cada cajera tiene un dropdown para cambiar su casino).
+- **Tab Configuración:** alta/baja de **casas** (nombre + checkbox "tiene cajeras" + checkbox "da apuesta gratis") con **Bono % editable** por casa (define el bono al depositar y el bono estimado por partido; poner 0 en casas sin bono real, ej. SuperPro) y **cajeras** (nombre + **casino asociado**; cada cajera tiene un dropdown para cambiar su casino).
 
 ## 7. Setup desde cero (si hiciera falta)
 1. Crear proyecto en supabase.com → SQL Editor → correr `supabase-schema.sql`.
-2. Settings → API → copiar URL + publishable/anon key en `config.js`.
-3. Abrir `index.html` (o deployar).
+2. Correr las migraciones **en este orden** (cada una agrega tablas/columnas; todas están en la raíz, gitignored):
+   1. `migracion-apuesta-gratis.sql` — columnas de apuesta gratis.
+   2. `migracion-partidos.sql` — tabla `partidos` + `apuestas.partido_id`.
+   3. `migracion-cajeras-saldo.sql` — tabla `movimientos` + `casas.tiene_cajeras`.
+   4. `migracion-bono-por-casa.sql` — `movimientos.casa`.
+   5. `migracion-cajera-casa.sql` — `cajeras.casa_id`.
+   6. `migracion-retiros-ganancia.sql` — tabla `retiros_ganancia`.
+   - `reset-datos.sql` (opcional): borra partidos/apuestas/líneas/movimientos, mantiene casas/cajeras.
+3. Settings → API → copiar URL + publishable/anon key en `config.js`.
+4. Abrir `index.html` (o deployar). En Configuración: setear Bono % de cada casa, marcar "tiene cajeras", y asociar cada cajera a su casino.
 
 ## 8. Deploy (flujo actual)
 Repo conectado a Vercel. **Cada `git push` a `main` redespliega solo.**

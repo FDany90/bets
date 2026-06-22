@@ -23,6 +23,7 @@ const state = {
   partidos: [],       // {id, nombre, fecha, hora, resultado_ganador}
   partidosById: {},   // id -> partido
   movimientos: [],    // {id, cajera_id, tipo, monto, bono_pct, nota, creado_en}
+  retirosGanancia: [],// {id, monto, nota, creado_en} — reparto de ganancias (baja el profit actual)
   apuestas: [],       // {id, partido_id, cajera, premio_cobrado, notas, lineas:[...], _partido}
   partidosColapsados: new Set(), // ids de partidos colapsados (por defecto van desplegados)
   pagina: 1,          // paginado del listado de partidos
@@ -287,17 +288,19 @@ function resumenCajera(c) {
 // ---------- Carga de datos ----------
 async function cargarTodo() {
   if (!sb) return;
-  const [casas, cajeras, partidos, movimientos, apuestas, lineas] = await Promise.all([
+  const [casas, cajeras, partidos, movimientos, retiros, apuestas, lineas] = await Promise.all([
     sb.from("casas").select("*").order("nombre"),
     sb.from("cajeras").select("*").order("nombre"),
     sb.from("partidos").select("*").order("fecha", { ascending: false, nullsFirst: false }).order("creado_en", { ascending: false }),
     sb.from("movimientos").select("*").order("creado_en", { ascending: false }),
+    sb.from("retiros_ganancia").select("*").order("creado_en", { ascending: false }),
     sb.from("apuestas").select("*").order("creado_en", { ascending: false }),
     sb.from("lineas").select("*").order("orden"),
   ]);
-  for (const r of [casas, cajeras, partidos, movimientos, apuestas, lineas]) {
+  for (const r of [casas, cajeras, partidos, movimientos, retiros, apuestas, lineas]) {
     if (r.error) { mostrarError(r.error.message); return; }
   }
+  state.retirosGanancia = retiros.data;
   state.casas = casas.data;
   state.casasById = {};
   casas.data.forEach((x) => { state.casasById[x.id] = x; });
@@ -424,11 +427,24 @@ function renderReporteResultados() {
     })
     .reduce((s, m) => s + num(m.monto), 0);
   const profitConBono = profitTotal + bonoGanado + gananciaManual;
+  // Retiros de ganancia (reparto): bajan el profit ACTUAL, no el histórico. Respeta período.
+  const retirosTotal = state.retirosGanancia.filter((r) => {
+    const fecha = (r.creado_en || "").slice(0, 10);
+    if (desde && fecha < desde) return false;
+    if (hasta && fecha > hasta) return false;
+    return true;
+  }).reduce((s, r) => s + num(r.monto), 0);
+  const profitActual = profitConBono - retirosTotal;
 
   const sinDatos = lista.length === 0;
   $("#rep-results").innerHTML = `
+    <div class="toolbar" style="margin-bottom:14px">
+      <button class="btn-ghost btn-sm" id="retirar-ganancia">💸 Retirar ganancia</button>
+      <button class="btn-ghost btn-sm" id="ver-retiros">📜 Retiros (${state.retirosGanancia.length})</button>
+    </div>
     <div class="kpis">
-      <div class="kpi"><div class="label">Profit total</div><div class="value ${profitConBono >= 0 ? "pos" : "neg"}">${money(profitConBono)}</div></div>
+      <div class="kpi"><div class="label">Profit total histórico</div><div class="value ${profitConBono >= 0 ? "pos" : "neg"}">${money(profitConBono)}</div></div>
+      <div class="kpi"><div class="label">Profit total actual</div><div class="value ${profitActual >= 0 ? "pos" : "neg"}">${money(profitActual)}</div></div>
       <div class="kpi"><div class="label">Transferencia recibido</div><div class="value pos">${money(transferencia)}</div></div>
       <div class="kpi"><div class="label">Total ingresado</div><div class="value">${money(ingresadoTotal)}</div></div>
       <div class="kpi"><div class="label">Total saldo cajeras actual</div><div class="value ${saldoCajeras >= 0 ? "pos" : "neg"}">${money(saldoCajeras)}</div></div>
@@ -449,6 +465,10 @@ function renderReporteResultados() {
       <thead><tr><th>Casa</th><th class="num">Líneas</th><th class="num">Cargado</th></tr></thead>
       <tbody>${filaCasa || `<tr><td colspan="3" class="muted">Sin datos</td></tr>`}</tbody></table></div></div>`}
   `;
+
+  // botones de retiro de ganancia (se recrean en cada render de resultados)
+  $("#retirar-ganancia")?.addEventListener("click", () => abrirRetirarGanancia());
+  $("#ver-retiros")?.addEventListener("click", () => abrirRetirosGanancia());
 }
 
 function bindReportes() {
@@ -473,6 +493,80 @@ function bindReportes() {
   });
 
   renderReporteResultados();
+}
+
+// ----- Retiro de ganancia (reparto): baja el profit actual, no el histórico -----
+function abrirRetirarGanancia() {
+  if (!sb) { alert("Primero configurá Supabase en config.js"); return; }
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-retiro-gan">
+      <div class="modal-head">
+        <h2 style="margin:0">💸 Retirar ganancia</h2>
+        <button type="button" class="btn-ghost btn-sm" id="rg-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted" style="margin:0 0 10px">Baja el <b>Profit total actual</b> (reparto). El histórico no cambia. El reparto entre ustedes es interno, no se guarda.</p>
+        <div><label>Monto a retirar</label><input type="number" step="any" name="monto" placeholder="1000000" required autofocus /></div>
+        <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Reparto con socio" /></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="rg-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Retirar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const f = $("#form-retiro-gan", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#rg-cerrar", dlg).addEventListener("click", cerrar);
+  $("#rg-cancelar", dlg).addEventListener("click", cerrar);
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const monto = num(f.monto.value);
+    if (!(monto > 0)) { alert("Ingresá un monto mayor a 0."); return; }
+    const { error } = await sb.from("retiros_ganancia").insert({ monto, nota: f.nota.value.trim() || null });
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render(); cerrar();
+  });
+}
+
+function abrirRetirosGanancia() {
+  const rows = state.retirosGanancia.map((r) => `<tr>
+    <td>${esc((r.creado_en || "").slice(0, 10))}</td>
+    <td>${esc(r.nota || "—")}</td>
+    <td class="num neg">-${money(num(r.monto))}</td>
+    <td><button type="button" class="btn-danger btn-sm" data-del-retiro="${r.id}" title="Borrar">🗑️</button></td>
+  </tr>`).join("");
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-retiros">
+      <div class="modal-head">
+        <h2 style="margin:0">📜 Retiros de ganancia</h2>
+        <button type="button" class="btn-ghost btn-sm" id="rt-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Nota</th><th class="num">Monto</th><th></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" class="muted">Sin retiros.</td></tr>`}</tbody>
+        </table></div>
+      </div>
+      <div class="modal-foot">
+        <button type="submit" class="btn-primary">Cerrar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#rt-cerrar", dlg).addEventListener("click", cerrar);
+  $("#form-retiros", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
+  $$("[data-del-retiro]", dlg).forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("¿Borrar este retiro? Vuelve a sumar al profit actual.")) return;
+    const { error } = await sb.from("retiros_ganancia").delete().eq("id", b.dataset.delRetiro);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render(); cerrar(); abrirRetirosGanancia();
+  }));
 }
 
 // ============================================================
@@ -1507,8 +1601,11 @@ function opcionesCasaCajera(selId) {
 }
 
 function viewConfig() {
-  const casas = state.casas.map((c) => `<div class="chip">${esc(c.nombre)} <span class="muted">${c.tiene_cajeras ? `· 💰 cajeras · bono ${num(c.bono_pct)}%` : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span>
-    <button data-del-casa="${c.id}" title="Borrar">✕</button></div>`).join("");
+  const casas = state.casas.map((c) => `<div class="cajera-cfg">
+    <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
+    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Bono % <input type="number" step="any" data-bono-casa="${c.id}" value="${num(c.bono_pct)}" style="width:80px" /></label>
+    <button class="btn-danger btn-sm" data-del-casa="${c.id}" title="Borrar">✕</button>
+  </div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}</span>
     <select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>
@@ -1518,7 +1615,7 @@ function viewConfig() {
   return `
     <div class="card">
       <h2>Casas de apuestas</h2>
-      <div class="chip-list" style="margin-bottom:14px">${casas || `<span class="muted">Sin casas</span>`}</div>
+      <div style="margin-bottom:14px">${casas || `<span class="muted">Sin casas</span>`}</div>
       <div class="row">
         <div class="field"><label>Nombre</label><input id="casa-nombre" placeholder="Ej. Vira" /></div>
         <div class="field"><label>Bono % (al depositar)</label><input id="casa-bono" type="number" step="any" value="0" /></div>
@@ -1565,6 +1662,11 @@ function bindConfig() {
   });
   $$("[data-casa-cajera]").forEach((sel) => sel.addEventListener("change", async () => {
     const { error } = await sb.from("cajeras").update({ casa_id: sel.value || null }).eq("id", sel.dataset.casaCajera);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  }));
+  $$("[data-bono-casa]").forEach((inp) => inp.addEventListener("change", async () => {
+    const { error } = await sb.from("casas").update({ bono_pct: num(inp.value) }).eq("id", inp.dataset.bonoCasa);
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   }));
