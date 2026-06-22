@@ -9,3 +9,7 @@ dist/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# Skills de Claude Code (tooling local, no es parte de la app)
+.agents/
+skills-lock.json
