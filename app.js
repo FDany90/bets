@@ -723,14 +723,18 @@ function filaApuesta(a) {
   const pend = c.estado === "Pendiente";
   const pot = pend ? potencialPorCasa(a) : [];
   const premioCell = pend ? potListHtml(pot, "premio") : money(c.premio);
-  const profitCell = pend ? potListHtml(pot, "profit") : (c.profit == null ? "—" : money(c.profit));
+  const profitCell = pend ? "—" : (c.profit == null ? "—" : money(c.profit));
+  // Saldo actual de la cajera (chico y gris), junto al nombre
+  const cajObj = state.cajeras.find((x) => x.nombre === a.cajera);
+  const saldoTxt = cajObj
+    ? ` <span class="saldo-inline">· Saldo actual: ${money(resumenCajera(cajObj).saldo)}</span>`
+    : "";
   return `<tr>
-    <td data-label="Cajera">${esc(a.cajera || "—")}</td>
-    <td data-label="Estado"><span class="badge ${esc(c.estado)}">${esc(c.estado)}</span></td>
+    <td data-label="Cajera">${esc(a.cajera || "—")}${saldoTxt}</td>
     <td data-label="Resultado / Cuota">${lineasApuestaHtml(a)}</td>
     <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
     <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>
-    <td class="num ${pend || c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="${pend ? "Profit potencial" : "Profit"}">${profitCell}</td>
+    <td class="num ${pend || c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}" data-label="Profit">${profitCell}</td>
     <td data-label="">
       <div class="acciones">
         <div class="acc-left">
@@ -788,10 +792,10 @@ function cardPartido(p) {
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
         <thead><tr>
-          <th>Cajera</th><th>Estado</th><th>Resultado / Cuota</th><th class="num">Ingresado</th>
+          <th>Cajera</th><th>Resultado / Cuota</th><th class="num">Ingresado</th>
           <th class="num">Premio</th><th class="num">Profit</th><th></th>
         </tr></thead>
-        <tbody>${filas || `<tr><td colspan="7" class="muted">Sin apuestas. Agregá la primera.</td></tr>`}</tbody>
+        <tbody>${filas || `<tr><td colspan="6" class="muted">Sin apuestas. Agregá la primera.</td></tr>`}</tbody>
       </table>
     </div>
     ` : ""}

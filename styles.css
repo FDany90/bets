@@ -207,6 +207,9 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .pos { color: var(--accent-hover); }
 .neg { color: var(--danger); }
 
+/* Saldo de la cajera junto al nombre en la fila de apuesta (chico y gris) */
+.saldo-inline { font-size: 12px; font-weight: 400; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
 /* Acciones de la fila: eliminar/editar a la izquierda, resolver/detalle a la derecha */
 .acciones { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
 .acc-left, .acc-right { display: flex; gap: 6px; }
