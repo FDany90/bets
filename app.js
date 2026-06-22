@@ -1421,7 +1421,18 @@ function viewCajeras() {
     </div>`;
   }).join("");
 
-  return `<div class="toolbar">
+  // Totales de todas las cajeras (saldo actual y plata apostada en pendientes)
+  const saldoTotal = state.cajeras.reduce((s, c) => s + resumenCajera(c).saldo, 0);
+  const apostadoTotal = state.cajeras.reduce(
+    (s, c) => s + partidosPendientesCajera(c).reduce((t, x) => t + x.monto, 0), 0);
+
+  return `<div class="card">
+      <div class="kpis">
+        <div class="kpi"><div class="label">Saldo total</div><div class="value ${saldoTotal >= 0 ? "pos" : "neg"}">${money(saldoTotal)}</div></div>
+        <div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>
+      </div>
+    </div>
+    <div class="toolbar">
       <button class="btn-primary" id="cargar-saldo">💵 Cargar saldo</button>
       <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
       <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
