@@ -72,6 +72,8 @@ header h1 { font-size: 23px; letter-spacing: -0.02em; display: flex; align-items
 .header-top { display: flex; flex-direction: column; gap: 2px; }
 .last-update { font-size: 12px; color: var(--text-dim); }
 .last-update b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.refresh-btn { font-size: 17px; line-height: 1; padding: 8px 12px; }
+.refresh-btn.spinning { animation: spin .8s linear infinite; pointer-events: none; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .tab {
   background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim);
@@ -244,6 +246,9 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 
 /* Saldo de la cajera junto al nombre en la fila de apuesta (chico y gris) */
 .saldo-inline { font-size: 12px; font-weight: 400; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+/* Cajera con saldo de retiro: nombre en verde (lista para retirar) */
+.cajera-nombre.retiro-ok { color: var(--accent-hover); font-weight: 700; }
+.retiro-tick { color: var(--accent-hover); }
 
 /* Acciones de la fila: eliminar/editar a la izquierda, resolver/detalle a la derecha */
 .acciones { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
@@ -262,15 +267,24 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .badge.Finalizado { background: rgba(108, 176, 255, 0.14); color: var(--blue); border-color: rgba(108, 176, 255, 0.30); }
 
 /* ---------- Tarjeta de partido (agrupa N apuestas) ---------- */
-.card.partido { padding-bottom: 16px; transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
-.card.partido:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm), var(--hi); }
+.card.partido {
+  padding-bottom: 16px; margin-bottom: 20px;
+  border-left: 4px solid var(--border-strong);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+/* Borde lateral por estado: ámbar pendiente, azul finalizado */
+.card.partido.estado-Pendiente { border-left-color: var(--warn); }
+.card.partido.estado-Finalizado { border-left-color: var(--blue); }
+.card.partido:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm), var(--hi); }
+.card.partido.estado-Pendiente:hover { box-shadow: 0 8px 26px rgba(227, 179, 65, 0.18), var(--hi); }
+.card.partido.estado-Finalizado:hover { box-shadow: 0 8px 26px rgba(108, 176, 255, 0.16), var(--hi); }
 .partido-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .partido-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.partido-info h2 { letter-spacing: -0.01em; }
+.partido-info h2 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .partido-toggle { padding: 7px 14px; font-size: 15px; font-weight: 600; line-height: 1; min-width: 0; }
 .partido-head .acciones { width: auto; }
-/* Botón grande "Agregar apuesta", arriba de la tabla de apuestas */
-.add-apuesta-btn { margin: 12px 0; font-size: 15px; padding: 10px 18px; }
+/* Botón "Agregar apuesta", arriba de la tabla de apuestas (discreto) */
+.add-apuesta-btn { margin: 10px 0; font-size: 13px; padding: 6px 13px; }
 .partido-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 12px; font-size: 13px; color: var(--text-dim); }
 .partido-meta b { color: var(--text); font-variant-numeric: tabular-nums; }
 .partido-meta b.pos { color: var(--accent-hover); }
@@ -284,6 +298,27 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .card.cajera { transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
 .card.cajera:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm), var(--hi); }
 .cajera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cajera-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Resaltado de cajera CON saldo de retiro cargado */
+.card.cajera.con-retiro {
+  border-color: rgba(46, 160, 67, 0.5);
+  box-shadow: 0 0 0 1px rgba(46, 160, 67, 0.22), 0 6px 26px var(--accent-glow), var(--hi);
+}
+
+/* Toggle/pill "Saldo de retiro" */
+.retiro-toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); background: var(--bg-input);
+  transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+  white-space: nowrap;
+}
+.retiro-toggle input { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.retiro-toggle.on {
+  color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.45);
+  background: linear-gradient(160deg, rgba(46, 160, 67, 0.18), rgba(46, 160, 67, 0.05));
+}
 .cajera-saldo { display: flex; flex-direction: column; margin: 12px 0; }
 .cajera-saldo .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
 .cajera-saldo .value { font-size: 31px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }

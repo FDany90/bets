@@ -745,8 +745,11 @@ function filaApuesta(a) {
   const saldoTxt = cajObj
     ? ` <span class="saldo-inline">· Saldo actual: ${money(resumenCajera(cajObj).saldo)}</span>`
     : "";
+  // Cajera con "saldo de retiro" activado → nombre en verde (lista para retirar)
+  const conRetiro = !!(cajObj && cajObj.saldo_retiro);
+  const nombreHtml = `<span class="cajera-nombre ${conRetiro ? "retiro-ok" : ""}">${esc(a.cajera || "—")}${conRetiro ? ` <span class="retiro-tick" title="Saldo de retiro listo">✓</span>` : ""}</span>`;
   return `<tr>
-    <td data-label="Cajera">${esc(a.cajera || "—")}${saldoTxt}</td>
+    <td data-label="Cajera">${nombreHtml}${saldoTxt}</td>
     <td data-label="Resultado / Cuota">${lineasApuestaHtml(a)}</td>
     <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
     <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>
@@ -774,7 +777,7 @@ function cardPartido(p) {
   const filas = cp.aps.map(filaApuesta).join("");
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
 
-  return `<div class="card partido">
+  return `<div class="card partido estado-${est}">
     <div class="partido-head">
       <div class="partido-info">
         <button type="button" class="btn-ghost partido-toggle" data-toggle-partido="${p.id}" title="${abierto ? "Colapsar" : "Desplegar"}">${abierto ? "▾ Menos" : "▸ Más"}</button>
@@ -804,7 +807,7 @@ function cardPartido(p) {
     </div>
     ${abierto ? `
     ${balanceHtml(p, est)}
-    <button class="btn-primary add-apuesta-btn" data-add-apuesta="${p.id}">+ Agregar apuesta</button>
+    <button class="btn-ghost add-apuesta-btn" data-add-apuesta="${p.id}">+ Agregar apuesta</button>
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
         <thead><tr>
@@ -1392,9 +1395,16 @@ function viewCajeras() {
     const casa = casaDeCajera(c);
     const pend = partidosPendientesCajera(c);
     const apostadoPend = pend.reduce((s, x) => s + x.monto, 0);
-    return `<div class="card cajera">
+    const conRetiro = !!c.saldo_retiro;
+    return `<div class="card cajera ${conRetiro ? "con-retiro" : ""}">
       <div class="cajera-head">
-        <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
+        <div class="cajera-title">
+          <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
+          <label class="retiro-toggle ${conRetiro ? "on" : ""}" title="Marcar cuando la cajera ya tiene saldo cargado para retirar">
+            <input type="checkbox" data-retiro-toggle="${c.id}" ${conRetiro ? "checked" : ""} />
+            ${conRetiro ? "✓ Saldo de retiro" : "Sin saldo de retiro"}
+          </label>
+        </div>
         <div class="acc-right">
           <button class="btn-primary btn-sm" data-cargar="${c.id}">💵 Cargar</button>
           <button class="btn-ghost btn-sm" data-retirar="${c.id}">🏧 Retirar</button>
@@ -1450,6 +1460,23 @@ function bindCajeras() {
   $$("[data-cargar]").forEach((b) => b.addEventListener("click", () => abrirCargar(byId(b.dataset.cargar))));
   $$("[data-retirar]").forEach((b) => b.addEventListener("click", () => abrirRetirar(byId(b.dataset.retirar))));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
+  $$("[data-retiro-toggle]").forEach((cb) => cb.addEventListener("change", () => toggleSaldoRetiro(cb.dataset.retiroToggle, cb.checked)));
+}
+
+// Marca/desmarca el "saldo de retiro" de una cajera (optimista; revierte si falla).
+async function toggleSaldoRetiro(cajeraId, valor) {
+  const c = state.cajeras.find((x) => x.id === cajeraId);
+  if (!c) return;
+  c.saldo_retiro = valor; // optimista
+  render();
+  setBusy(true);
+  const { error } = await sb.from("cajeras").update({ saldo_retiro: valor }).eq("id", cajeraId);
+  setBusy(false);
+  if (error) {
+    c.saldo_retiro = !valor; // revierte
+    render();
+    mostrarError("No se pudo actualizar el saldo de retiro: " + error.message);
+  }
 }
 
 // cajeraFija opcional: si no se pasa, el popup muestra un selector de cajera
@@ -1861,6 +1888,16 @@ function bindConfig() {
 //   ARRANQUE
 // ============================================================
 $$("[data-tab]").forEach((t) => t.addEventListener("click", () => { state.tab = t.dataset.tab; render(); }));
+
+// Refresh manual: re-baja todos los datos del servidor y re-renderiza.
+$("#refresh")?.addEventListener("click", async () => {
+  if (!sb) return;
+  const btn = $("#refresh");
+  if (btn.classList.contains("spinning")) return; // evita dobles
+  btn.classList.add("spinning");
+  try { await cargarTodo(); render(); }
+  finally { btn.classList.remove("spinning"); }
+});
 
 // Feedback inmediato al enviar un formulario dentro de un modal: el botón de
 // submit muestra spinner y se deshabilita mientras se guarda. Si el modal sigue

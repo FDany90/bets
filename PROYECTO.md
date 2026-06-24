@@ -29,6 +29,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-bono-por-casa.sql` | Migración que agregó `movimientos.casa` (bono de depósito configurable por casa) |
 | `migracion-cajera-casa.sql` | Migración que agregó `cajeras.casa_id` (cada cajera pertenece a un casino) |
 | `migracion-retiros-ganancia.sql` | Migración que creó la tabla `retiros_ganancia` (reparto; baja el profit actual) |
+| `migracion-cajera-saldo-retiro.sql` | Migración que agregó `cajeras.saldo_retiro` (flag manual: cajera lista para retirar) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -42,7 +43,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - `id` uuid · `nombre` text único · `bono_pct` numeric (**bono de depósito por casa**, ej. Vira=20, SuperPro=10; se aplica al cargar dinero, NO en las apuestas) · `tiene_cajeras` boolean (sus líneas descuentan/acreditan el saldo de la cajera, ej. Vira=true) · `permite_gratis` boolean (da "apuesta gratis", ej. Betano=true) · `creado_en`
 
 **`cajeras`** — catálogo de cajeras + billetera (saldo)
-- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `creado_en`
+- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `saldo_retiro` boolean (**flag manual**: la cajera ya tiene saldo cargado para poder retirar; resalta la card en verde) · `creado_en`
 - El **saldo no se guarda**: se calcula en vivo (ver tabla `movimientos` y sección 5).
 
 **`movimientos`** — cargas y retiros manuales de dinero por cajera
