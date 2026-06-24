@@ -30,6 +30,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-cajera-casa.sql` | Migración que agregó `cajeras.casa_id` (cada cajera pertenece a un casino) |
 | `migracion-retiros-ganancia.sql` | Migración que creó la tabla `retiros_ganancia` (reparto; baja el profit actual) |
 | `migracion-cajera-saldo-retiro.sql` | Migración que agregó `cajeras.saldo_retiro` (flag manual: cajera lista para retirar) |
+| `migracion-partido-bono-retiro.sql` | Migración que agregó `partidos.bono_retiro` (snapshot del bono por saldo de retiro al resolver) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -51,7 +52,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
-- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `creado_en`
+- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%/100`; suma al profit) · `creado_en`
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)

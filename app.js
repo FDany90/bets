@@ -209,6 +209,20 @@ function bonoEstimadoPartido(p) {
   return apuestasDePartido(p.id).reduce((s, a) => s + bonoEstimadoApuesta(a), 0);
 }
 
+// Bono por "saldo de retiro" al resolver: por cada cajera distinta del partido
+// con el flag saldo_retiro activado, (saldo actual) × (bono% de su casino) / 100.
+// Se evalúa con los saldos del momento (al resolver se guarda como snapshot).
+function bonoRetiroPartido(p) {
+  const nombres = [...new Set(apuestasDePartido(p.id).map((a) => a.cajera).filter(Boolean))];
+  return nombres.reduce((s, nombre) => {
+    const c = state.cajeras.find((x) => x.nombre === nombre);
+    if (!c || !c.saldo_retiro) return s;
+    const casa = casaDeCajera(c);
+    const bp = casa ? num(casa.bono_pct) : 0;
+    return s + resumenCajera(c).saldo * bp / 100;
+  }, 0);
+}
+
 // HTML del balance por resultado (solo partidos pendientes con resultados cargados)
 function balanceHtml(p, est) {
   if (est !== "Pendiente") return "";
@@ -544,7 +558,19 @@ function renderReporteResultados() {
       return true;
     })
     .reduce((s, m) => s + num(m.monto), 0);
-  const profitConBono = profitTotal + bonoGanado + gananciaManual;
+  // Bono por saldo de retiro: snapshot guardado por partido al resolver. Suma al
+  // histórico. Es un agregado por partido, así que con filtro de cajera se omite
+  // (no se puede subdividir). Filtra por la fecha del partido dentro del período.
+  const bonoRetiroTotal = f.cajera ? 0 : state.partidos
+    .filter((p) => p.resultado_ganador)
+    .filter((p) => {
+      const fecha = p.fecha || "";
+      if (desde && fecha && fecha < desde) return false;
+      if (hasta && fecha && fecha > hasta) return false;
+      return true;
+    })
+    .reduce((s, p) => s + num(p.bono_retiro), 0);
+  const profitConBono = profitTotal + bonoGanado + gananciaManual + bonoRetiroTotal;
   // Retiros de ganancia (reparto): bajan el profit ACTUAL, no el histórico. Respeta período.
   const retirosTotal = state.retirosGanancia.filter((r) => {
     const fecha = (r.creado_en || "").slice(0, 10);
@@ -773,6 +799,8 @@ function cardPartido(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
   const bonoEst = bonoEstimadoPartido(p);
+  const bonoRet = num(p.bono_retiro);
+  const bonoTotal = bonoEst + bonoRet;
   const abierto = !state.partidosColapsados.has(p.id);
   const filas = cp.aps.map(filaApuesta).join("");
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
@@ -803,7 +831,8 @@ function cardPartido(p) {
       <span>Ingresado: <b>${money(cp.ingresado)}</b></span>
       ${cp.profitDef ? `<span>Profit: <b class="${cp.profit >= 0 ? "pos" : "neg"}">${money(cp.profit)}</b></span>` : ""}
       ${bonoEst > 0 ? `<span>Bono estimado: <b class="pos">${money(bonoEst)}</b></span>` : ""}
-      ${cp.profitDef && bonoEst > 0 ? `<span>Profit + bono (est.): <b class="pos">${money(cp.profit + bonoEst)}</b></span>` : ""}
+      ${bonoRet > 0 ? `<span>Bono retiro: <b class="pos">${money(bonoRet)}</b></span>` : ""}
+      ${cp.profitDef && bonoTotal > 0 ? `<span>Profit + bono (est.): <b class="pos">${money(cp.profit + bonoTotal)}</b></span>` : ""}
     </div>
     ${abierto ? `
     ${balanceHtml(p, est)}
@@ -1342,8 +1371,10 @@ function abrirResolverPartido(p) {
 
   const preview = () => {
     const res = f.resultado_ganador.value || null;
+    let totalProfit = 0;
     const rows = aps.map((a) => {
       const c = calcApuesta({ ...a, _partido: { resultado_ganador: res } });
+      if (c.profit != null) totalProfit += c.profit;
       return `<tr>
         <td>${esc(a.cajera || "—")}</td>
         <td><span class="badge ${esc(c.estado)}">${esc(c.estado)}</span></td>
@@ -1352,9 +1383,20 @@ function abrirResolverPartido(p) {
         <td class="num ${c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}">${c.profit == null ? "—" : money(c.profit)}</td>
       </tr>`;
     }).join("");
+    const bonoEst = res ? bonoEstimadoPartido(p) : 0;
+    const bonoRet = res ? bonoRetiroPartido(p) : 0;
+    const totalConBono = totalProfit + bonoEst + bonoRet;
+    // Totales (solo cuando se eligió un resultado)
+    const totales = res ? `
+      <div class="resolver-totales">
+        <div class="rt-row"><span>Profit total cajeras</span><b class="${totalProfit >= 0 ? "pos" : "neg"}">${money(totalProfit)}</b></div>
+        ${bonoEst > 0 ? `<div class="rt-row"><span>Bono estimado</span><b class="pos">+${money(bonoEst)}</b></div>` : ""}
+        ${bonoRet > 0 ? `<div class="rt-row"><span>Bono por saldo de retiro</span><b class="pos">+${money(bonoRet)}</b></div>` : ""}
+        <div class="rt-total"><span>Total</span><b class="${totalConBono >= 0 ? "pos" : "neg"}">${money(totalConBono)}</b></div>
+      </div>` : "";
     $("#r-preview", dlg).innerHTML = `<div class="tbl-wrap"><table>
       <thead><tr><th>Cajera</th><th>Estado</th><th class="num">Ingresado</th><th class="num">Premio</th><th class="num">Profit</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="5" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>`;
+      <tbody>${rows || `<tr><td colspan="5" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>${totales}`;
   };
 
   f.resultado_ganador.addEventListener("change", preview);
@@ -1369,8 +1411,13 @@ function abrirResolverPartido(p) {
 async function resolverPartido(dlg, id) {
   if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
   const f = $("#form-resolver", dlg);
+  const p = state.partidosById[id];
+  const res = f.resultado_ganador.value || null;
+  // Snapshot del bono por saldo de retiro con los saldos actuales (antes de aplicar
+  // el resultado). Si se reabre (pendiente), queda en 0.
+  const bonoRetiro = res && p ? bonoRetiroPartido(p) : 0;
   const { error } = await sb.from("partidos")
-    .update({ resultado_ganador: f.resultado_ganador.value || null })
+    .update({ resultado_ganador: res, bono_retiro: bonoRetiro })
     .eq("id", id);
   if (error) { alert("Error: " + error.message); return false; }
   await cargarTodo();

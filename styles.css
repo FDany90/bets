@@ -294,6 +294,13 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .partido-balance .bal-item { display: inline-flex; align-items: baseline; gap: 6px; }
 .partido-balance .bal-res { color: var(--text-dim); }
 
+/* Totales en el popup Resolver (profit cajeras + bono retiro + total grande) */
+.resolver-totales { margin-top: 14px; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; gap: 6px; }
+.resolver-totales .rt-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 14px; color: var(--text-dim); }
+.resolver-totales .rt-row b { color: var(--text); font-variant-numeric: tabular-nums; }
+.resolver-totales .rt-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 15px; font-weight: 700; }
+.resolver-totales .rt-total b { font-size: 26px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
 /* ---------- Tarjeta de cajera (saldo / billetera) ---------- */
 .card.cajera { transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
 .card.cajera:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm), var(--hi); }
