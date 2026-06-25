@@ -1465,14 +1465,21 @@ function viewCajeras() {
     const pend = partidosPendientesCajera(c);
     const apostadoPend = pend.reduce((s, x) => s + x.monto, 0);
     const conRetiro = !!c.saldo_retiro;
-    return `<div class="card cajera ${conRetiro ? "con-retiro" : ""}">
+    const conPendiente = !!c.pendiente_retiro;
+    return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""}">
       <div class="cajera-head">
         <div class="cajera-title">
           <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
-          <label class="retiro-toggle ${conRetiro ? "on" : ""}" title="Marcar cuando la cajera ya tiene saldo cargado para retirar">
-            <input type="checkbox" data-retiro-toggle="${c.id}" ${conRetiro ? "checked" : ""} />
-            ${conRetiro ? "✓ Saldo de retiro" : "Sin saldo de retiro"}
-          </label>
+          <div class="retiro-toggles">
+            <label class="retiro-toggle ${conRetiro ? "on" : ""}" title="Marcar cuando la cajera ya tiene saldo cargado para retirar">
+              <input type="checkbox" data-retiro-toggle="${c.id}" ${conRetiro ? "checked" : ""} />
+              ${conRetiro ? "✓ Saldo de retiro" : "Sin saldo de retiro"}
+            </label>
+            <label class="retiro-toggle pend ${conPendiente ? "on" : ""}" title="Marcar para bloquear: tiene saldo pendiente de retirar y no se debe tocar hasta hacer el retiro">
+              <input type="checkbox" data-pendiente-toggle="${c.id}" ${conPendiente ? "checked" : ""} />
+              ${conPendiente ? "🔒 Pendiente de retiro" : "Sin pendiente de retiro"}
+            </label>
+          </div>
         </div>
         <div class="acc-right">
           <button class="btn-primary btn-sm" data-cargar="${c.id}">💵 Cargar</button>
@@ -1483,7 +1490,7 @@ function viewCajeras() {
       </div>
       <div class="cajera-saldo">
         <span class="label">Saldo disponible</span>
-        <span class="value ${r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
+        <span class="value ${conPendiente ? "bloqueado" : r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
       </div>
       <div class="cajera-desglose">
         <span>Apostado (pendiente) <b>${money(apostadoPend)}</b></span>
@@ -1530,6 +1537,7 @@ function bindCajeras() {
   $$("[data-retirar]").forEach((b) => b.addEventListener("click", () => abrirRetirar(byId(b.dataset.retirar))));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
   $$("[data-retiro-toggle]").forEach((cb) => cb.addEventListener("change", () => toggleSaldoRetiro(cb.dataset.retiroToggle, cb.checked)));
+  $$("[data-pendiente-toggle]").forEach((cb) => cb.addEventListener("change", () => togglePendienteRetiro(cb.dataset.pendienteToggle, cb.checked)));
 }
 
 // Marca/desmarca el "saldo de retiro" de una cajera (optimista; revierte si falla).
@@ -1545,6 +1553,22 @@ async function toggleSaldoRetiro(cajeraId, valor) {
     c.saldo_retiro = !valor; // revierte
     render();
     mostrarError("No se pudo actualizar el saldo de retiro: " + error.message);
+  }
+}
+
+// Marca/desmarca "pendiente de retiro" (bloqueo visual rojo; optimista, revierte si falla).
+async function togglePendienteRetiro(cajeraId, valor) {
+  const c = state.cajeras.find((x) => x.id === cajeraId);
+  if (!c) return;
+  c.pendiente_retiro = valor; // optimista
+  render();
+  setBusy(true);
+  const { error } = await sb.from("cajeras").update({ pendiente_retiro: valor }).eq("id", cajeraId);
+  setBusy(false);
+  if (error) {
+    c.pendiente_retiro = !valor; // revierte
+    render();
+    mostrarError("No se pudo actualizar el pendiente de retiro: " + error.message);
   }
 }
 

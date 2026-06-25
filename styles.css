@@ -31,7 +31,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { color-scheme: dark; }
+html { color-scheme: dark; overflow-x: hidden; }
 
 body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -163,6 +163,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-hover); }
+
+/* En táctiles (iOS/Android), los campos < 16px disparan el zoom automático del
+   navegador al enfocarlos (y al cerrar el popup la página queda descentrada).
+   Subimos a 16px solo en pantallas táctiles; en desktop se mantienen en 14px. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
+
 .grid { display: grid; gap: 12px; }
 .grid-2 { grid-template-columns: 1fr 1fr; }
 .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
@@ -312,6 +320,11 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
   border-color: rgba(46, 160, 67, 0.5);
   box-shadow: 0 0 0 1px rgba(46, 160, 67, 0.22), 0 6px 26px var(--accent-glow), var(--hi);
 }
+/* Resaltado de cajera PENDIENTE de retiro (bloqueada): rojo, gana sobre el verde */
+.card.cajera.pendiente-retiro {
+  border-color: rgba(248, 81, 73, 0.5);
+  box-shadow: 0 0 0 1px rgba(248, 81, 73, 0.22), 0 6px 26px rgba(248, 81, 73, 0.28), var(--hi);
+}
 
 /* Toggle/pill "Saldo de retiro" */
 .retiro-toggle {
@@ -326,10 +339,17 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
   color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.45);
   background: linear-gradient(160deg, rgba(46, 160, 67, 0.18), rgba(46, 160, 67, 0.05));
 }
+.retiro-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.retiro-toggle.pend input { accent-color: var(--danger); }
+.retiro-toggle.pend.on {
+  color: #ff9a93; border-color: rgba(248, 81, 73, 0.5);
+  background: linear-gradient(160deg, rgba(248, 81, 73, 0.18), rgba(248, 81, 73, 0.05));
+}
 .cajera-saldo { display: flex; flex-direction: column; margin: 12px 0; }
 .cajera-saldo .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
 .cajera-saldo .value { font-size: 31px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .cajera-saldo .value.pos { text-shadow: 0 0 24px var(--accent-glow); }
+.cajera-saldo .value.bloqueado { color: var(--danger); text-shadow: 0 0 24px rgba(248, 81, 73, 0.35); }
 .cajera-desglose { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-dim); }
 .cajera-desglose b { color: var(--text); font-variant-numeric: tabular-nums; }
 
