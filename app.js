@@ -209,12 +209,17 @@ function bonoEstimadoPartido(p) {
   return apuestasDePartido(p.id).reduce((s, a) => s + bonoEstimadoApuesta(a), 0);
 }
 
-// Cajeras distintas del partido que tienen el "saldo de retiro" activado.
-function cajerasConRetiroDePartido(p) {
+// Cajeras distintas (objetos) que participan en las apuestas de un partido.
+function cajerasDePartido(p) {
   const nombres = [...new Set(apuestasDePartido(p.id).map((a) => a.cajera).filter(Boolean))];
   return nombres
     .map((nombre) => state.cajeras.find((x) => x.nombre === nombre))
-    .filter((c) => c && c.saldo_retiro);
+    .filter(Boolean);
+}
+
+// Cajeras distintas del partido que tienen el "saldo de retiro" activado.
+function cajerasConRetiroDePartido(p) {
+  return cajerasDePartido(p).filter((c) => c.saldo_retiro);
 }
 
 // Bono por "saldo de retiro" al resolver: por cada cajera distinta del partido
@@ -1398,7 +1403,7 @@ function abrirResolverPartido(p) {
         ${bonoEst > 0 ? `<div class="rt-row"><span>Bono estimado</span><b class="pos">+${money(bonoEst)}</b></div>` : ""}
         ${bonoRet > 0 ? `<div class="rt-row"><span>Bono por saldo de retiro</span><b class="pos">+${money(bonoRet)}</b></div>` : ""}
         <div class="rt-total"><span>Total</span><b class="${totalConBono >= 0 ? "pos" : "neg"}">${money(totalConBono)}</b></div>
-      </div>${bonoRet > 0 ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar se desactiva el “saldo de retiro” de esas cajeras (se cuenta una sola vez).</p>` : ""}` : "";
+      </div>${bonoRet > 0 ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar se desactiva el “saldo de retiro” de esas cajeras (se cuenta una sola vez).</p>` : ""}${!p.resultado_ganador ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar, las cajeras de este partido quedan en <b style="color:var(--danger)">🔒 Pendiente de retiro</b> (rojas) hasta que hagas el retiro.</p>` : ""}` : "";
     $("#r-preview", dlg).innerHTML = `<div class="tbl-wrap"><table>
       <thead><tr><th>Cajera</th><th>Estado</th><th class="num">Ingresado</th><th class="num">Premio</th><th class="num">Profit</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>${totales}`;
@@ -1422,12 +1427,16 @@ async function resolverPartido(dlg, id) {
 
   const update = { resultado_ganador: res };
   let cajerasConsumidas = [];
+  let cajerasABloquear = [];
   if (res && eraPendiente) {
     // Primera resolución: snapshot del bono (saldos del momento) y se "consume"
     // el saldo de retiro de esas cajeras → se desactiva el check para no contarlo
     // de nuevo si la misma cajera está en otro partido sin resolver.
     update.bono_retiro = bonoRetiroPartido(p);
     cajerasConsumidas = cajerasConRetiroDePartido(p);
+    // Todas las cajeras del partido quedan "pendientes de retiro" (rojas):
+    // tienen saldo a la espera de retirar y no se deben tocar.
+    cajerasABloquear = cajerasDePartido(p).filter((c) => !c.pendiente_retiro);
   } else if (!res) {
     update.bono_retiro = 0; // vuelve a pendiente: se anula el bono
   }
@@ -1440,6 +1449,12 @@ async function resolverPartido(dlg, id) {
   if (cajerasConsumidas.length) {
     await Promise.all(cajerasConsumidas.map((c) =>
       sb.from("cajeras").update({ saldo_retiro: false }).eq("id", c.id)));
+  }
+
+  // Activa "pendiente de retiro" en todas las cajeras del partido recién resuelto
+  if (cajerasABloquear.length) {
+    await Promise.all(cajerasABloquear.map((c) =>
+      sb.from("cajeras").update({ pendiente_retiro: true }).eq("id", c.id)));
   }
 
   await cargarTodo();
