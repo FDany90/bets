@@ -52,7 +52,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
-- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%/100`; suma al profit) · `creado_en`
+- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `creado_en`
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)
