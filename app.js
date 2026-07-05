@@ -1070,6 +1070,18 @@ function renderLineasNueva(dlg) {
       const i = +row.dataset.i;
       const f = inp.dataset.f;
       modalLineas[i][f] = inp.value;
+      if (f === "cajera") {
+        // Al elegir la cajera, autocompleta la casa con su casino asignado.
+        const caj = state.cajeras.find((x) => x.nombre === inp.value);
+        const casa = casaDeCajera(caj);
+        if (casa) {
+          modalLineas[i].casa = casa.nombre;
+          if (!casaPermiteGratis(casa.nombre)) modalLineas[i].apuesta_gratis = "";
+        }
+        renderLineasNueva(dlg);
+        actualizarResumenNueva(dlg);
+        return;
+      }
       if (f === "casa") {
         if (!casaPermiteGratis(inp.value)) modalLineas[i].apuesta_gratis = "";
         renderLineasNueva(dlg);

@@ -117,7 +117,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
   - **Premio por resultado** (solo partidos pendientes): por cada resultado posible, el **premio total** que se cobraría (Σ de todas las apuestas del partido) si sale ese resultado. Ordenado de mayor a menor. (Reemplazó al "Balance por resultado".)
   - **Bono estimado** (informativo): Σ por línea `monto_cargado × bp/(100+bp)`.
   - **Bono por saldo de retiro:** ver sección 5.
-  - **Modal Nueva apuesta:** una fila por casa, cada fila con su cajera; agrupa por cajera (una apuesta por cajera). **Modal Editar / Detalle** por apuesta.
+  - **Modal Nueva apuesta:** una fila por casa, cada fila con su cajera; agrupa por cajera (una apuesta por cajera). Al **elegir la cajera se autocompleta la Casa** con su casino asignado (`casa_id`), sin tener que seleccionarlo a mano (se puede cambiar igual). **Modal Editar / Detalle** por apuesta.
 
 **Tab Cajeras** — **card de resumen arriba** (Saldo total + Total apostado de todas las cajeras). Una tarjeta por cajera con:
   - **Saldo disponible** (piso en 0) + **Apostado (pendiente)** + lista de **Partidos pendientes** con su monto. (Se quitaron los totales históricos cargado/ganado/retirado.) Ordenadas por **última actividad**.
