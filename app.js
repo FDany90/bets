@@ -233,14 +233,16 @@ function bonoRetiroPartido(p) {
   }, 0);
 }
 
-// HTML del balance por resultado (solo partidos pendientes con resultados cargados)
-function balanceHtml(p, est) {
+// HTML del "premio por resultado": por cada resultado posible, el premio total
+// que se cobraría (suma de todas las apuestas del partido) si sale ese resultado.
+// Solo en partidos pendientes con resultados cargados.
+function premioPorResultadoHtml(p, est) {
   if (est !== "Pendiente") return "";
-  const bal = balancePartido(p);
+  const bal = balancePartido(p).sort((a, b) => b.premio - a.premio);
   if (!bal.length) return "";
   return `<div class="partido-balance">
-    <span class="bal-title">Balance por resultado:</span>
-    ${bal.map((b) => `<span class="bal-item"><span class="bal-res">${esc(b.resultado)}</span> <b class="${b.profit >= 0 ? "pos" : "neg"}">${b.profit >= 0 ? "+" : ""}${money(b.profit)}</b>${b.pct != null ? ` <span class="muted">(${b.pct >= 0 ? "+" : ""}${b.pct.toFixed(1)}%)</span>` : ""}</span>`).join("")}
+    <span class="bal-title">Premio por resultado:</span>
+    ${bal.map((b) => `<span class="bal-item"><span class="bal-res">${esc(b.resultado)}</span> <b class="pos">${money(b.premio)}</b></span>`).join("")}
   </div>`;
 }
 
@@ -845,7 +847,7 @@ function cardPartido(p) {
       ${cp.profitDef && bonoTotal > 0 ? `<span>Profit + bono (est.): <b class="pos">${money(cp.profit + bonoTotal)}</b></span>` : ""}
     </div>
     ${abierto ? `
-    ${balanceHtml(p, est)}
+    ${premioPorResultadoHtml(p, est)}
     <button class="btn-ghost add-apuesta-btn" data-add-apuesta="${p.id}">+ Agregar apuesta</button>
     <div class="tbl-wrap">
       <table class="apuestas-tbl">
