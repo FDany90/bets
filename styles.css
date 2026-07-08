@@ -353,6 +353,14 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .cajera-saldo .value { font-size: 31px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .cajera-saldo .value.pos { text-shadow: 0 0 24px var(--accent-glow); }
 .cajera-saldo .value.bloqueado { color: var(--danger); text-shadow: 0 0 24px rgba(248, 81, 73, 0.35); }
+/* Badge de disponibilidad de retiro (se puede retirar cada 24 h) */
+.retiro-badge {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px;
+  font-size: 12.5px; font-weight: 700; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.retiro-badge.ok { color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.4); background: rgba(46, 160, 67, 0.12); }
+.retiro-badge.wait { color: var(--warn); border-color: rgba(227, 179, 65, 0.4); background: rgba(227, 179, 65, 0.12); }
 .cajera-desglose { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-dim); }
 .cajera-desglose b { color: var(--text); font-variant-numeric: tabular-nums; }
 

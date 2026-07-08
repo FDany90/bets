@@ -455,6 +455,31 @@ function tiempoRelativo(ms) {
   return s;
 }
 
+// Duración en texto corto para cuenta regresiva: "3 h 20 m", "45 min".
+function fmtDuracion(ms) {
+  const totalMin = Math.max(1, Math.ceil(ms / 60000));
+  const horas = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  if (horas >= 1) return `${horas} h${min > 0 ? ` ${min} m` : ""}`;
+  return `${min} min`;
+}
+
+// Estado del retiro de una cajera: se puede retirar cada 24 h desde el último
+// retiro. Devuelve { disponible, faltaMs, ultimo } (ultimo en ms, 0 si nunca).
+const RETIRO_INTERVALO_MS = 24 * 60 * 60 * 1000;
+function estadoRetiroCajera(c) {
+  let ultimo = 0;
+  state.movimientos.forEach((m) => {
+    if (m.cajera_id === c.id && m.tipo === "Retiro" && m.creado_en) {
+      const t = Date.parse(m.creado_en);
+      if (!isNaN(t) && t > ultimo) ultimo = t;
+    }
+  });
+  if (!ultimo) return { disponible: true, faltaMs: 0, ultimo: 0 };
+  const falta = ultimo + RETIRO_INTERVALO_MS - Date.now();
+  return { disponible: falta <= 0, faltaMs: Math.max(0, falta), ultimo };
+}
+
 function actualizarUltimaAct() {
   const el = $("#ultima-act");
   if (!el) return;
@@ -1521,6 +1546,12 @@ function viewCajeras() {
         <span class="label">Saldo disponible</span>
         <span class="value ${conPendiente ? "bloqueado" : r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
       </div>
+      ${(() => {
+        const er = estadoRetiroCajera(c);
+        return er.disponible
+          ? `<div class="retiro-badge ok">✅ Retiro disponible</div>`
+          : `<div class="retiro-badge wait">⏳ Retiro disponible en ${fmtDuracion(er.faltaMs)}</div>`;
+      })()}
       <div class="cajera-desglose">
         <span>Apostado (pendiente) <b>${money(apostadoPend)}</b></span>
       </div>
