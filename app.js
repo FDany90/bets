@@ -45,6 +45,17 @@ const fmtHora = (h) => {
   if (!t) return "";
   return /hs/i.test(t) ? t : `${t} hs`;
 };
+// Formatea un timestamp ISO (creado_en) a fecha y hora locales: "2026-07-08" / "14:30".
+const fmtFechaHoraPartes = (iso) => {
+  if (!iso) return { fecha: "—", hora: "" };
+  const d = new Date(iso);
+  if (isNaN(d)) return { fecha: String(iso).slice(0, 10), hora: "" };
+  const p = (n) => String(n).padStart(2, "0");
+  return {
+    fecha: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+    hora: `${p(d.getHours())}:${p(d.getMinutes())}`,
+  };
+};
 // Convierte una hora de texto libre ("13 hs", "13:30", "9.45") a minutos del día.
 // Devuelve null si no hay un número de hora reconocible (esos van al final al ordenar).
 const horaAMinutos = (h) => {
@@ -1859,13 +1870,16 @@ function abrirMovimientos(c) {
   });
   items.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
 
-  const rows = items.map((it) => `<tr>
-    <td>${esc((it.fecha || "").slice(0, 10))}</td>
+  const rows = items.map((it) => {
+    const fh = fmtFechaHoraPartes(it.fecha);
+    return `<tr>
+    <td><div>${esc(fh.fecha)}</div>${fh.hora ? `<div class="muted" style="font-size:12px">${esc(fh.hora)} hs</div>` : ""}</td>
     <td>${esc(it.tipo)}</td>
     <td>${esc(it.detalle || "—")}</td>
     <td class="num ${it.efecto >= 0 ? "pos" : "neg"}">${it.efecto >= 0 ? "+" : ""}${money(it.efecto)}</td>
     <td>${it.id ? `<button type="button" class="btn-danger btn-sm" data-del-mov="${it.id}" title="Borrar movimiento">🗑️</button>` : ""}</td>
-  </tr>`).join("");
+  </tr>`;
+  }).join("");
 
   const dlg = document.createElement("dialog");
   dlg.innerHTML = `
