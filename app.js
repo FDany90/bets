@@ -405,7 +405,8 @@ function resumenCajera(c) {
   const transferOut = state.transferencias
     .filter((t) => t.origen_id === c.id).reduce((s, t) => s + num(t.monto), 0);
   const transferIn = state.transferencias
-    .filter((t) => t.destino_id === c.id).reduce((s, t) => s + (num(t.monto) - num(t.comision)), 0);
+    .filter((t) => t.destino_id === c.id)
+    .reduce((s, t) => s + (num(t.monto) - num(t.comision) + num(t.bono_destino)), 0);
 
   // Apostar descuenta; ganar y cargar suman; retirar y transferir a otro restan.
   // El saldo nunca queda negativo: piso en 0.
@@ -423,6 +424,7 @@ function ultimaActividadCajera(c) {
   };
   state.movimientos.forEach((m) => { if (m.cajera_id === c.id) considerar(m.creado_en); });
   state.apuestas.forEach((a) => { if (a.cajera === c.nombre) considerar(a.creado_en); });
+  state.transferencias.forEach((t) => { if (t.origen_id === c.id || t.destino_id === c.id) considerar(t.creado_en); });
   return max;
 }
 
@@ -2109,8 +2111,8 @@ function abrirMovimientos(c) {
       tipo: "Transferencia",
       detalle: esOrigen
         ? `→ ${otro}${num(t.comision) > 0 ? ` · comisión ${money(num(t.comision))}` : ""}`
-        : `← ${otro} (neto)`,
-      efecto: esOrigen ? -num(t.monto) : (num(t.monto) - num(t.comision)),
+        : `← ${otro}${num(t.bono_destino) > 0 ? ` · bono ${money(num(t.bono_destino))}` : ""}`,
+      efecto: esOrigen ? -num(t.monto) : (num(t.monto) - num(t.comision) + num(t.bono_destino)),
     });
   });
   items.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
@@ -2261,13 +2263,18 @@ function abrirTransferir(cuentaFija) {
       ? { origen: cuenta, destino: cajero }
       : { origen: cajero, destino: cuenta };
   };
+  // Bono de depósito del casino del cajero destino (cuando el dinero ENTRA a un cajero).
+  const bonoPctDestino = (destino) => (!esCuenta(destino) ? num((casaDeCajera(destino) || {}).bono_pct) : 0);
   const refrescar = () => {
     const { origen, destino } = partes();
     const monto = num(f.monto.value);
     // La comisión se cobra SOLO cuando el dinero entra a una cuenta (cajero → cuenta).
     const cobraComision = esCuenta(destino);
     const comision = cobraComision ? monto * cp / 100 : 0;
-    const neto = monto - comision;
+    // Bono de depósito: solo cuando el destino es un cajero con casino que da bono.
+    const bpDest = bonoPctDestino(destino);
+    const bonoDest = monto * bpDest / 100;
+    const neto = monto - comision + bonoDest;
     const saldoOrigen = origen ? resumenCajera(origen).saldo : 0;
     const insuf = monto > saldoOrigen;
     $("#t-resumen", dlg).innerHTML = `
@@ -2275,6 +2282,7 @@ function abrirTransferir(cuentaFija) {
       ${cobraComision
         ? `<div class="rt-row"><span>Comisión (${cp}%)</span><b class="neg">−${money(comision)}</b></div>`
         : `<div class="rt-row"><span>Comisión</span><b class="muted">sin comisión (cuenta → cajero)</b></div>`}
+      ${bonoDest > 0 ? `<div class="rt-row"><span>Bono depósito (${bpDest}%)</span><b class="pos">+${money(bonoDest)}</b></div>` : ""}
       <div class="rt-row"><span>Recibe <b>${esc(destino ? destino.nombre : "—")}</b></span><b class="pos">+${money(neto)}</b></div>
       <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - monto >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - monto))}</b></div>
       ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor al monto.</p>` : ""}`;
@@ -2290,6 +2298,9 @@ function abrirTransferir(cuentaFija) {
     // Comisión solo cuando entra a una cuenta (cajero → cuenta).
     const cobraComision = esCuenta(destino);
     const comision = cobraComision ? monto * cp / 100 : 0;
+    // Bono de depósito solo cuando entra a un cajero con casino (cuenta → cajero).
+    const bpDest = bonoPctDestino(destino);
+    const bonoDest = monto * bpDest / 100;
     const payload = {
       origen_id: origen.id,
       destino_id: destino.id,
@@ -2298,6 +2309,8 @@ function abrirTransferir(cuentaFija) {
       monto,
       comision_pct: cobraComision ? cp : 0,
       comision,
+      bono_pct_destino: bpDest,
+      bono_destino: bonoDest,
       nota: f.nota.value.trim() || null,
     };
     if (guardarTransferencia(payload)) cerrar();
@@ -2338,8 +2351,9 @@ function abrirTransferencias() {
       <td><div>${esc(fh.fecha)}</div>${fh.hora ? `<div class="muted" style="font-size:12px">${esc(fh.hora)} hs</div>` : ""}</td>
       <td>${esc(t.origen_nombre || "—")} → ${esc(t.destino_nombre || "—")}${t.nota ? ` <span class="muted">· ${esc(t.nota)}</span>` : ""}</td>
       <td class="num">${money(num(t.monto))}</td>
-      <td class="num neg">−${money(num(t.comision))}</td>
-      <td class="num pos">${money(num(t.monto) - num(t.comision))}</td>
+      <td class="num neg">${num(t.comision) > 0 ? `−${money(num(t.comision))}` : "—"}</td>
+      <td class="num pos">${num(t.bono_destino) > 0 ? `+${money(num(t.bono_destino))}` : "—"}</td>
+      <td class="num pos">${money(num(t.monto) - num(t.comision) + num(t.bono_destino))}</td>
       <td><button type="button" class="btn-danger btn-sm" data-del-transf="${t.id}" title="Borrar">🗑️</button></td>
     </tr>`;
   }).join("");
@@ -2354,8 +2368,8 @@ function abrirTransferencias() {
       </div>
       <div class="modal-body">
         <div class="tbl-wrap"><table>
-          <thead><tr><th>Fecha</th><th>De → A</th><th class="num">Monto</th><th class="num">Comisión</th><th class="num">Neto</th><th></th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="6" class="muted">Sin transferencias.</td></tr>`}</tbody>
+          <thead><tr><th>Fecha</th><th>De → A</th><th class="num">Monto</th><th class="num">Comisión</th><th class="num">Bono</th><th class="num">Neto</th><th></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="muted">Sin transferencias.</td></tr>`}</tbody>
         </table></div>
         <p class="muted" style="margin:10px 0 0">Comisión total (todas): <b class="neg">−${money(totalComision)}</b>. Se descuenta del profit. Borrar una revierte el saldo y la comisión.</p>
       </div>

@@ -37,6 +37,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-cuentas-transferencias.sql` | Migración que agregó `cajeras.es_cuenta` + tablas `config` (ajustes globales) y `transferencias` (cajero↔cuenta con comisión) |
 | `migracion-admins.sql` | Migración que agregó la tabla `admins` (dueños) + `cajeras.admin_id` (agrupar/filtrar cajeros y cuentas por admin) |
 | `migracion-casa-filtro.sql` | Migración que agregó `casas.mostrar_filtro` (marca qué casinos aparecen en el filtro por casino del sub-tab Cajeros) |
+| `migracion-transferencia-bono.sql` | Migración que agregó `transferencias.bono_pct_destino` / `bono_destino` (bono de depósito al transferir a un cajero) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -59,9 +60,9 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 **`config`** — ajustes globales clave/valor
 - `clave` text (PK) · `valor` text. Hoy guarda `comision_cuenta_pct` (% de comisión de las cuentas, default 5).
 
-**`transferencias`** — mueve plata entre un cajero y una cuenta (con comisión)
-- `id` uuid · `origen_id` uuid (FK → cajeras, on delete set null) · `destino_id` uuid (FK → cajeras) · `origen_nombre` / `destino_nombre` text (snapshots por si se borra la cajera) · `monto` numeric (lo que sale del origen) · `comision_pct` numeric · `comision` numeric (monto de comisión) · `nota` text · `creado_en`
-- Efecto: origen −`monto`, destino +(`monto`−`comision`). La `comision` es un **gasto** que baja el profit (histórico y actual). Historial propio, separado de `retiros_ganancia`.
+**`transferencias`** — mueve plata entre un cajero y una cuenta (con comisión / bono)
+- `id` uuid · `origen_id` uuid (FK → cajeras, on delete set null) · `destino_id` uuid (FK → cajeras) · `origen_nombre` / `destino_nombre` text (snapshots por si se borra la cajera) · `monto` numeric (lo que sale del origen) · `comision_pct` / `comision` numeric (solo cajero → cuenta) · `bono_pct_destino` / `bono_destino` numeric (**snapshot** del bono de depósito del casino del cajero destino; solo cuenta → cajero) · `nota` text · `creado_en`
+- Efecto: origen −`monto`, destino +(`monto` − `comision` + `bono_destino`). La `comision` (solo al entrar a una **cuenta**) es un **gasto** que baja el profit. El `bono_destino` (solo al entrar a un **cajero** con casino) infla el saldo del cajero, igual que una Carga con bono (no es profit directo). Historial propio, separado de `retiros_ganancia`.
 
 **`movimientos`** — cargas y retiros manuales de dinero por cajera
 - `id` uuid · `cajera_id` uuid (FK → cajeras, on delete cascade) · `tipo` text ('Carga'|'Retiro') · `monto` numeric (base ingresado, positivo) · `bono_pct` numeric (bono aplicado en la carga; 0 si sin bono/retiro) · `casa` text (en qué casa se cargó, define el bono) · `nota` text · `creado_en`
@@ -105,7 +106,7 @@ El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). S
 `saldo(cajera) = max(0, Σ efecto(movimientos) − Σ apostado_vira + Σ ganado_vira + transferIn − transferOut)`
 - `efecto(Carga) = monto × (1 + bono_pct/100)` · `efecto(Retiro) = −monto`.
 - `transferOut = Σ monto` de las transferencias donde la cajera es **origen** (sale el monto completo).
-- `transferIn = Σ (monto − comision)` de las transferencias donde la cajera es **destino** (recibe el neto). La `comision` no vuelve a nadie: es gasto contra profit.
+- `transferIn = Σ (monto − comision + bono_destino)` de las transferencias donde la cajera es **destino**. La `comision` (solo al entrar a una cuenta) no vuelve a nadie: es gasto contra profit. El `bono_destino` (solo al entrar a un cajero con casino) es el bono de depósito que infla el saldo.
 - `apostado_vira(apuesta) = Σ monto_cargado` de las líneas de casas con cajeras (se descuenta apenas existe la apuesta).
 - `ganado_vira(apuesta) = Σ premio` de las líneas con cajera cuyo `resultado == partido.resultado_ganador` (se acredita al resolver el partido). Si gana una casa sin cajera, no acredita.
 - El `max(0, …)` evita saldos negativos cuando se apuesta sin haber cargado dinero.
@@ -135,7 +136,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
   - **Bono por saldo de retiro:** ver sección 5.
   - **Modal Nueva apuesta:** una fila por casa, cada fila con su cajera; agrupa por cajera (una apuesta por cajera). Al **elegir la cajera se autocompleta la Casa** con su casino asignado (`casa_id`), sin tener que seleccionarlo a mano (se puede cambiar igual). **Modal Editar / Detalle** por apuesta.
 
-**Cuentas (personas) y transferencias** — Las **cuentas** (`cajeras.es_cuenta = true`) son personas a las que se les transfiere plata; se administran igual que los cajeros (saldo/movimientos) pero **no apuestan** (no aparecen en apuestas ni en los modales Cargar/Retirar/Ganancia). Una **transferencia** cajero↔cuenta mueve saldo. La **comisión** (global, `config.comision_cuenta_pct`, 5% default) se cobra **solo cuando el dinero entra a una cuenta (cajero → cuenta)**; en el sentido cuenta → cajero **no** hay comisión. El origen baja `monto`, el destino recibe `monto − comisión`, y la comisión es un **gasto que baja el profit histórico y actual**. Tiene su **historial propio** (`transferencias`, botón 🔁 Transferencias en Cajeras y en Reportes). Con filtro de cajera en Reportes la comisión se omite (gasto no atribuible a una cajera).
+**Cuentas (personas) y transferencias** — Las **cuentas** (`cajeras.es_cuenta = true`) son personas a las que se les transfiere plata; se administran igual que los cajeros (saldo/movimientos) pero **no apuestan** (no aparecen en apuestas ni en los modales Cargar/Retirar/Ganancia). Una **transferencia** cajero↔cuenta mueve saldo. La **comisión** (global, `config.comision_cuenta_pct`, 5% default) se cobra **solo cuando el dinero entra a una cuenta (cajero → cuenta)**; en el sentido cuenta → cajero **no** hay comisión. Además, en **cuenta → cajero** se acredita el **bono de depósito** del casino del cajero (ej. Vira 15%), snapshot al momento, igual que una Carga con bono. El origen baja `monto`, el destino recibe `monto − comisión + bono`, y la comisión es un **gasto que baja el profit histórico y actual** (el bono solo infla saldo). Una transferencia también cuenta como **actividad** (ordena la card del cajero/cuenta arriba). Tiene su **historial propio** (`transferencias`, botón 🔁 Transferencias en Cajeras y en Reportes). Con filtro de cajera en Reportes la comisión se omite (gasto no atribuible a una cajera).
 
 **Tab Cajeras** — **sub-tabs (chips)** *Cajeros* / *Cuentas* + **filtro por Admin** (Todos / cada admin / Sin admin; aplica a ambos sub-tabs y a los totales) + **filtro por Casino** (solo en el sub-tab Cajeros; lista solo los casinos con `mostrar_filtro` marcado en Config). El admin del cajero/cuenta se muestra en la card. Card de resumen arriba (Saldo total del tab; en Cajeros además Total apostado). Botón **🔁 Transferir** (elige sentido cajero↔cuenta, monto; preview de comisión y neto) en ambos tabs. Las **cuentas** muestran una card simple (saldo + recibido neto + enviado + botones Transferir/Movimientos, sin toggles de apuesta). Una tarjeta por cajera con:
   - **Saldo disponible** (piso en 0) + **badge de disponibilidad de retiro** (se puede retirar cada **24 h** desde el último retiro: verde **"✅ Retiro disponible"** si pasaron 24 h o nunca retiró, ámbar **"⏳ Retiro disponible en 3 h 20 m"** con cuenta regresiva si falta) + **Apostado (pendiente)** + lista de **Partidos pendientes** con su monto. (Se quitaron los totales históricos cargado/ganado/retirado.) Ordenadas por **última actividad**.
@@ -161,6 +162,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
    11. `migracion-cuentas-transferencias.sql` — `cajeras.es_cuenta` + tablas `config` y `transferencias`.
    12. `migracion-admins.sql` — tabla `admins` + `cajeras.admin_id`.
    13. `migracion-casa-filtro.sql` — `casas.mostrar_filtro`.
+   14. `migracion-transferencia-bono.sql` — `transferencias.bono_pct_destino` / `bono_destino`.
    - `reset-datos.sql` (opcional): borra partidos/apuestas/líneas/movimientos, mantiene casas/cajeras.
 3. Settings → API → copiar URL + publishable/anon key en `config.js`.
 4. Abrir `index.html` (o deployar). En Configuración: setear Bono % de cada casa, marcar "tiene cajeras", y asociar cada cajera a su casino.
