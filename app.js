@@ -35,6 +35,7 @@ const state = {
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
   cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
   filtroAdmin: "",    // "" = todos · "none" = sin admin · <id> = ese admin
+  filtroCasa: "",     // "" = todos · <id> = ese casino (solo aplica a Cajeros)
 };
 
 // Admin (dueño) de una cajera/cuenta, o null.
@@ -1637,10 +1638,12 @@ function viewCajeras() {
   if (!state.cajeras.length) {
     return `<div class="card"><p class="muted">No hay cajeras ni cuentas todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
   }
-  // Filtro por admin (aplica a ambos sub-tabs).
+  // Filtro por admin (aplica a ambos sub-tabs) y por casino (solo Cajeros).
   const fAdmin = state.filtroAdmin;
   const pasaAdmin = (c) => fAdmin === "" || (fAdmin === "none" ? !c.admin_id : c.admin_id === fAdmin);
-  const cajeros = state.cajeras.filter((c) => !esCuenta(c) && pasaAdmin(c));
+  const fCasa = state.filtroCasa;
+  const pasaCasa = (c) => fCasa === "" || c.casa_id === fCasa;
+  const cajeros = state.cajeras.filter((c) => !esCuenta(c) && pasaAdmin(c) && pasaCasa(c));
   const cuentas = state.cajeras.filter((c) => esCuenta(c) && pasaAdmin(c));
   const tab = state.cajerasTab === "cuenta" ? "cuenta" : "cajero";
 
@@ -1657,6 +1660,15 @@ function viewCajeras() {
         <option value="" ${fAdmin === "" ? "selected" : ""}>Todos</option>
         ${state.admins.map((a) => `<option value="${a.id}" ${fAdmin === a.id ? "selected" : ""}>${esc(a.nombre)}</option>`).join("")}
         <option value="none" ${fAdmin === "none" ? "selected" : ""}>Sin admin</option>
+      </select>
+    </div>` : "";
+  // Filtro por casino: solo en el sub-tab Cajeros y solo con casinos marcados.
+  const casasFiltro = state.casas.filter((x) => x.mostrar_filtro);
+  const casaFiltro = (tab === "cajero" && casasFiltro.length) ? `<div class="admin-filtro">
+      <label class="muted" style="margin:0">Casino</label>
+      <select id="filtro-casa">
+        <option value="" ${fCasa === "" ? "selected" : ""}>Todos</option>
+        ${casasFiltro.map((x) => `<option value="${x.id}" ${fCasa === x.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("")}
       </select>
     </div>` : "";
 
@@ -1693,7 +1705,7 @@ function viewCajeras() {
         ${tab === "cuenta" ? "" : `<div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>`}
       </div>
     </div>
-    <div class="chips-filtro">${chips}${adminFiltro}</div>
+    <div class="chips-filtro">${chips}${casaFiltro}${adminFiltro}</div>
     ${toolbar}${cards}`;
 }
 
@@ -1780,6 +1792,7 @@ function bindCajeras() {
   const byId = (id) => state.cajeras.find((c) => c.id === id);
   $$("[data-cajtab]").forEach((b) => b.addEventListener("click", () => { state.cajerasTab = b.dataset.cajtab; render(); }));
   $("#filtro-admin")?.addEventListener("change", (e) => { state.filtroAdmin = e.target.value; render(); });
+  $("#filtro-casa")?.addEventListener("change", (e) => { state.filtroCasa = e.target.value; render(); });
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
@@ -2355,11 +2368,13 @@ function viewConfig() {
   const casas = state.casas.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
     <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Bono % <input type="number" step="any" data-bono-casa="${c.id}" value="${num(c.bono_pct)}" style="width:80px" /></label>
+    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap" title="Mostrar este casino en el filtro del panel de Cajeros"><input type="checkbox" data-filtro-casa="${c.id}" ${c.mostrar_filtro ? "checked" : ""} style="width:auto" /> 🔎 filtro</label>
     <button class="btn-danger btn-sm" data-del-casa="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
-    <span class="cajera-cfg-nombre">${esc(c.nombre)}${esCuenta(c) ? ` <span class="muted">· 👤 cuenta</span>` : ""}</span>
+    <span class="cajera-cfg-nombre">${esc(c.nombre)}</span>
     ${esCuenta(c) ? `<span class="muted">sin casino</span>` : `<select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>`}
+    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap" title="Marcar como cuenta (persona, no apuesta)"><input type="checkbox" data-cuenta-cajera="${c.id}" ${esCuenta(c) ? "checked" : ""} style="width:auto" /> 👤 cuenta</label>
     <select data-admin-cajera="${c.id}" title="Admin">${opcionesAdmin(c.admin_id)}</select>
     <button class="btn-danger btn-sm" data-del-cajera="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
@@ -2380,6 +2395,9 @@ function viewConfig() {
         </label>
         <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="casa-gratis" style="width:auto" /> 🎁 Da apuesta gratis
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="casa-filtro" style="width:auto" /> 🔎 Mostrar en filtro
         </label>
         <button class="btn-primary" id="add-casa">Agregar casa</button>
       </div>
@@ -2425,10 +2443,16 @@ function bindConfig() {
       bono_pct: num($("#casa-bono").value),
       tiene_cajeras: $("#casa-cajeras").checked,
       permite_gratis: $("#casa-gratis").checked,
+      mostrar_filtro: $("#casa-filtro").checked,
     });
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   });
+  $$("[data-filtro-casa]").forEach((cb) => cb.addEventListener("change", async () => {
+    const { error } = await sb.from("casas").update({ mostrar_filtro: cb.checked }).eq("id", cb.dataset.filtroCasa);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  }));
   $("#add-cajera")?.addEventListener("click", async () => {
     const nombre = $("#cajera-nombre").value.trim();
     if (!nombre) return;
@@ -2456,6 +2480,13 @@ function bindConfig() {
   });
   $$("[data-admin-cajera]").forEach((sel) => sel.addEventListener("change", async () => {
     const { error } = await sb.from("cajeras").update({ admin_id: sel.value || null }).eq("id", sel.dataset.adminCajera);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  }));
+  $$("[data-cuenta-cajera]").forEach((cb) => cb.addEventListener("change", async () => {
+    // Marcar/desmarcar como cuenta. Si pasa a cuenta, se le saca el casino.
+    const upd = cb.checked ? { es_cuenta: true, casa_id: null } : { es_cuenta: false };
+    const { error } = await sb.from("cajeras").update(upd).eq("id", cb.dataset.cuentaCajera);
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   }));
