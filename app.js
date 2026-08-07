@@ -2107,6 +2107,7 @@ function abrirMovimientos(c) {
     const esOrigen = t.origen_id === c.id;
     const otro = esOrigen ? (t.destino_nombre || "—") : (t.origen_nombre || "—");
     items.push({
+      id: t.id, esTransf: true, // borrable desde acá (revierte la transferencia)
       fecha: t.creado_en,
       tipo: "Transferencia",
       detalle: esOrigen
@@ -2124,7 +2125,9 @@ function abrirMovimientos(c) {
     <td>${esc(it.tipo)}</td>
     <td>${esc(it.detalle || "—")}</td>
     <td class="num ${it.efecto >= 0 ? "pos" : "neg"}">${it.efecto >= 0 ? "+" : ""}${money(it.efecto)}</td>
-    <td>${it.id ? `<button type="button" class="btn-danger btn-sm" data-del-mov="${it.id}" title="Borrar movimiento">🗑️</button>` : ""}</td>
+    <td>${it.id
+      ? `<button type="button" class="btn-danger btn-sm" ${it.esTransf ? `data-del-transf="${it.id}"` : `data-del-mov="${it.id}"`} title="Borrar">🗑️</button>`
+      : ""}</td>
   </tr>`;
   }).join("");
 
@@ -2140,7 +2143,7 @@ function abrirMovimientos(c) {
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="num">Monto</th><th></th></tr></thead>
           <tbody>${rows || `<tr><td colspan="5" class="muted">Sin movimientos.</td></tr>`}</tbody>
         </table></div>
-        <p class="muted" style="margin:10px 0 0">Solo se pueden borrar Cargas y Retiros. Apuesta/Premio salen de las apuestas.</p>
+        <p class="muted" style="margin:10px 0 0">Se pueden borrar Cargas, Retiros, Ganancias y Transferencias (revierte el saldo). Apuesta/Premio salen de las apuestas.</p>
       </div>
       <div class="modal-foot">
         <button type="submit" class="btn-primary">Cerrar</button>
@@ -2152,6 +2155,7 @@ function abrirMovimientos(c) {
   $("#m-cerrar", dlg).addEventListener("click", cerrar);
   $("#form-movs", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
   $$("[data-del-mov]", dlg).forEach((b) => b.addEventListener("click", () => borrarMovimiento(b.dataset.delMov, c.id, dlg)));
+  $$("[data-del-transf]", dlg).forEach((b) => b.addEventListener("click", () => borrarTransferencia(b.dataset.delTransf, dlg, () => abrirMovimientos(c))));
 }
 
 async function borrarMovimiento(id, cajeraId, dlg) {
@@ -2382,16 +2386,17 @@ function abrirTransferencias() {
   const cerrar = () => { dlg.close(); dlg.remove(); };
   $("#th-cerrar", dlg).addEventListener("click", cerrar);
   $("#form-transf-hist", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
-  $$("[data-del-transf]", dlg).forEach((b) => b.addEventListener("click", () => borrarTransferencia(b.dataset.delTransf, dlg)));
+  $$("[data-del-transf]", dlg).forEach((b) => b.addEventListener("click", () => borrarTransferencia(b.dataset.delTransf, dlg, abrirTransferencias)));
 }
 
-async function borrarTransferencia(id, dlg) {
-  if (!confirm("¿Borrar esta transferencia? El saldo y la comisión se revierten.")) return;
+// reabrir: callback opcional para volver a mostrar el modal desde el que se borró.
+async function borrarTransferencia(id, dlg, reabrir) {
+  if (!confirm("¿Borrar esta transferencia? El saldo, la comisión y el bono se revierten.")) return;
   const backup = [...state.transferencias];
   state.transferencias = state.transferencias.filter((t) => t.id !== id);
   render();
-  dlg.close(); dlg.remove();
-  abrirTransferencias(); // reabrir ya sin la fila
+  if (dlg) { dlg.close(); dlg.remove(); }
+  if (reabrir) reabrir(); // reabrir ya sin la fila
 
   setBusy(true);
   const { error } = await sb.from("transferencias").delete().eq("id", id);
