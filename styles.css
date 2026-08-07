@@ -353,6 +353,11 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .cajera-saldo .value { font-size: 31px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .cajera-saldo .value.pos { text-shadow: 0 0 24px var(--accent-glow); }
 .cajera-saldo .value.bloqueado { color: var(--danger); text-shadow: 0 0 24px rgba(248, 81, 73, 0.35); }
+/* Card de cuenta (persona): acento azulado para distinguir de un cajero */
+.card.cajera.cuenta {
+  border-color: rgba(108, 176, 255, 0.4);
+  box-shadow: 0 0 0 1px rgba(108, 176, 255, 0.16), var(--shadow-sm), var(--hi);
+}
 /* Badge de disponibilidad de retiro (se puede retirar cada 24 h) */
 .retiro-badge {
   display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px;

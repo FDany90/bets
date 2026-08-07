@@ -33,6 +33,8 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-cajera-saldo-retiro.sql` | Migración que agregó `cajeras.saldo_retiro` (flag manual: cajera lista para retirar) |
 | `migracion-cajera-pendiente-retiro.sql` | Migración que agregó `cajeras.pendiente_retiro` (flag manual: bloqueo visual rojo, saldo a la espera de retirar) |
 | `migracion-partido-bono-retiro.sql` | Migración que agregó `partidos.bono_retiro` (snapshot del bono por saldo de retiro al resolver) |
+| `migracion-partido-bono-apuestas.sql` | Migración que agregó `partidos.bono_apuestas` (snapshot editable del bono de depósito al resolver; congela el histórico) |
+| `migracion-cuentas-transferencias.sql` | Migración que agregó `cajeras.es_cuenta` + tablas `config` (ajustes globales) y `transferencias` (cajero↔cuenta con comisión) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -45,16 +47,23 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 **`casas`** — catálogo de casas de apuestas
 - `id` uuid · `nombre` text único · `bono_pct` numeric (**bono de depósito por casa**, ej. Vira=20, SuperPro=10; se aplica al cargar dinero, NO en las apuestas) · `tiene_cajeras` boolean (sus líneas descuentan/acreditan el saldo de la cajera, ej. Vira=true) · `permite_gratis` boolean (da "apuesta gratis", ej. Betano=true) · `creado_en`
 
-**`cajeras`** — catálogo de cajeras + billetera (saldo)
-- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `saldo_retiro` boolean (**flag manual**: la cajera ya tiene saldo cargado para poder retirar; resalta la card en verde) · `pendiente_retiro` boolean (**flag manual** independiente: bloqueo visual, tiene saldo a la espera de retirar y no se debe tocar; resalta la card y el monto en **rojo**, gana sobre el verde; solo visual) · `creado_en`
-- El **saldo no se guarda**: se calcula en vivo (ver tabla `movimientos` y sección 5).
+**`cajeras`** — catálogo de cajeras + billetera (saldo). Incluye también las **cuentas** (personas).
+- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `es_cuenta` boolean (**true = cuenta**: persona a la que se le transfiere plata; NO es un cajero para apostar, no se asocia a casino ni aparece en las apuestas; se muestra en una sub-tab aparte) · `saldo_retiro` boolean (**flag manual**: la cajera ya tiene saldo cargado para poder retirar; resalta la card en verde) · `pendiente_retiro` boolean (**flag manual** independiente: bloqueo visual, tiene saldo a la espera de retirar y no se debe tocar; resalta la card y el monto en **rojo**, gana sobre el verde; solo visual) · `creado_en`
+- El **saldo no se guarda**: se calcula en vivo (ver tabla `movimientos`, `transferencias` y sección 5).
+
+**`config`** — ajustes globales clave/valor
+- `clave` text (PK) · `valor` text. Hoy guarda `comision_cuenta_pct` (% de comisión de las cuentas, default 5).
+
+**`transferencias`** — mueve plata entre un cajero y una cuenta (con comisión)
+- `id` uuid · `origen_id` uuid (FK → cajeras, on delete set null) · `destino_id` uuid (FK → cajeras) · `origen_nombre` / `destino_nombre` text (snapshots por si se borra la cajera) · `monto` numeric (lo que sale del origen) · `comision_pct` numeric · `comision` numeric (monto de comisión) · `nota` text · `creado_en`
+- Efecto: origen −`monto`, destino +(`monto`−`comision`). La `comision` es un **gasto** que baja el profit (histórico y actual). Historial propio, separado de `retiros_ganancia`.
 
 **`movimientos`** — cargas y retiros manuales de dinero por cajera
 - `id` uuid · `cajera_id` uuid (FK → cajeras, on delete cascade) · `tipo` text ('Carga'|'Retiro') · `monto` numeric (base ingresado, positivo) · `bono_pct` numeric (bono aplicado en la carga; 0 si sin bono/retiro) · `casa` text (en qué casa se cargó, define el bono) · `nota` text · `creado_en`
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
-- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `creado_en`
+- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (**snapshot editable** del bono de depósito al resolver: default = Σ por línea `monto × bp/(100+bp)` con el bono% actual de la casa, pero **editable** en el popup Resolver. `null` = sin congelar → se calcula en vivo y la app lo **congela solo** (backfill). Una vez congelado, editar el bono% de la casa **no** lo cambia) · `creado_en`
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)
@@ -88,8 +97,10 @@ Por **apuesta**:
 
 ### Saldo por cajera (billetera, derivado)
 El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). Solo las casas con `tiene_cajeras` (hoy **Vira**) mueven el saldo.
-`saldo(cajera) = max(0, Σ efecto(movimientos) − Σ apostado_vira + Σ ganado_vira)`
+`saldo(cajera) = max(0, Σ efecto(movimientos) − Σ apostado_vira + Σ ganado_vira + transferIn − transferOut)`
 - `efecto(Carga) = monto × (1 + bono_pct/100)` · `efecto(Retiro) = −monto`.
+- `transferOut = Σ monto` de las transferencias donde la cajera es **origen** (sale el monto completo).
+- `transferIn = Σ (monto − comision)` de las transferencias donde la cajera es **destino** (recibe el neto). La `comision` no vuelve a nadie: es gasto contra profit.
 - `apostado_vira(apuesta) = Σ monto_cargado` de las líneas de casas con cajeras (se descuenta apenas existe la apuesta).
 - `ganado_vira(apuesta) = Σ premio` de las líneas con cajera cuyo `resultado == partido.resultado_ganador` (se acredita al resolver el partido). Si gana una casa sin cajera, no acredita.
 - El `max(0, …)` evita saldos negativos cuando se apuesta sin haber cargado dinero.
@@ -107,25 +118,27 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
 - **Bottom nav fija** (estilo app): 📊 Reportes · 🥅 Partidos · 👩 Cajeras · ⚙️ Config.
 - **Feedback:** barra de progreso global durante operaciones de red, `:active` en botones, spinner en botones de submit, fade del contenido al cambiar de vista. Operaciones de cajera y del toggle de saldo de retiro son **optimistas** (UI instantánea, persiste en segundo plano, revierte si falla).
 
-**Tab Reportes** — KPIs en orden: **Profit total actual** (= histórico − Σ retiros de ganancia) · **Profit total histórico** (= Σ "profit + bono estimado" de resueltas + ganancias manuales + Σ `bono_retiro` de partidos resueltos) · Transferencia recibido · Total ingresado · Total saldo cajeras actual · Total en apuestas pendientes · Apuestas resueltas · % promedio. Botones **💸 Retirar ganancia** y **📜 Retiros**. Tablas: profit por mes, por cajera, ingresado por casa. **Filtros:** período (Todo / Semana / Mes / Personalizado), cajera, rango de ingresado. (Con filtro de cajera, el `bono_retiro` se omite por ser un agregado por partido.)
+**Tab Reportes** — KPIs en orden: **Profit total actual** (= histórico − Σ retiros de ganancia) · **Profit total histórico** (= Σ profit real de resueltas + Σ `bono_apuestas` **snapshot** de partidos resueltos + ganancias manuales + Σ `bono_retiro` de partidos resueltos). **menos Σ `comision`** de transferencias del período (gasto real). ⚠️ El bono de depósito ahora sale del **snapshot congelado por partido** (no se recalcula con el bono% actual de la casa): editar el bono de una casa **ya no mueve** el profit histórico. Con filtro de cajera, los bonos por partido (`bono_apuestas` y `bono_retiro`) y las comisiones se omiten (no se pueden subdividir por cajera). · Transferencia recibido · Total ingresado · Total saldo cajeras actual · Total en apuestas pendientes · Apuestas resueltas · % promedio. Botones **💸 Retirar ganancia** y **📜 Retiros**. Tablas: profit por mes, por cajera, ingresado por casa. **Filtros:** período (Todo / Semana / Mes / Personalizado), cajera, rango de ingresado. (Con filtro de cajera, el `bono_retiro` se omite por ser un agregado por partido.)
 
-**Tab Partidos** (home) — tarjetas de partido con apuestas anidadas, ordenadas por **fecha y hora ascendente** (el más próximo primero). **Chips** Pendientes/Finalizados/Todos (arranca en Pendientes). **Paginado** de 10.
+**Tab Partidos** (home) — tarjetas de partido con apuestas anidadas. **Orden:** pendientes por **fecha/hora ascendente** (el más próximo primero); **finalizados descendente** (el más reciente primero); en "Todos" van los pendientes arriba y los finalizados abajo. **Chips** Pendientes/Finalizados/Todos (arranca en Pendientes). **Paginado** de 10.
   - **Flujo:** `+ Nuevo partido` → dentro `+ Agregar apuesta` (botón ghost, chico, arriba de la tabla) → `✅ Resolver` una vez.
   - **Tarjeta:** **título grande coloreado por estado** (ámbar=Pendiente, azul=Finalizado) + **borde lateral y superior** del mismo color (separa visualmente dónde empieza cada partido), header + totales (nº apuestas, ingresado, profit, **Bono estimado**, **Bono retiro**, **Profit + bono (est.)** = profit + bono estimado + bono retiro). Botones 🗑️/✏️, ✅ Resolver / ↩️ Cambiar resultado. **Desplegable** con toggle "▸ Más / ▾ Menos".
   - **Apuesta (fila):** **nombre de la cajera** (en **verde + ✓** si tiene `saldo_retiro` activado) + **saldo actual** (chico, gris) · resultado/cuota por casa · ingresado · premio (potencial si pendiente) · profit (oculto si pendiente, real si resuelto). Botones 🗑️/✏️/👁️. (Se quitaron las columnas Estado y profit potencial.)
-  - **Popup Resolver:** dropdown del resultado + preview por apuesta + **bloque de totales**: Profit total cajeras · Bono estimado · Bono por saldo de retiro · **Total** (grande). Al guardar **consume el saldo de retiro** de esas cajeras (se cuenta una sola vez) y **activa "Pendiente de retiro"** (rojo) en todas las cajeras del partido. "Pendiente" lo reabre (anula el bono; **no** desactiva el rojo, se hace a mano al retirar).
+  - **Popup Resolver:** dropdown del resultado + **campo editable "Bono de depósito"** (default = bono calculado con el % actual de la casa; se **congela** en `bono_apuestas` al guardar) + preview por apuesta + **bloque de totales**: Profit total cajeras · Bono de depósito (el editado) · Bono por saldo de retiro · **Total** (grande). Al guardar **consume el saldo de retiro** de esas cajeras (se cuenta una sola vez) y **activa "Pendiente de retiro"** (rojo) en todas las cajeras del partido. "Pendiente" lo reabre (anula ambos bonos; descongela `bono_apuestas`; **no** desactiva el rojo, se hace a mano al retirar).
   - **Premio por resultado** (solo partidos pendientes): por cada resultado posible, el **premio total** que se cobraría (Σ de todas las apuestas del partido) si sale ese resultado. Ordenado de mayor a menor. (Reemplazó al "Balance por resultado".)
   - **Bono estimado** (informativo): Σ por línea `monto_cargado × bp/(100+bp)`.
   - **Bono por saldo de retiro:** ver sección 5.
   - **Modal Nueva apuesta:** una fila por casa, cada fila con su cajera; agrupa por cajera (una apuesta por cajera). Al **elegir la cajera se autocompleta la Casa** con su casino asignado (`casa_id`), sin tener que seleccionarlo a mano (se puede cambiar igual). **Modal Editar / Detalle** por apuesta.
 
-**Tab Cajeras** — **card de resumen arriba** (Saldo total + Total apostado de todas las cajeras). Una tarjeta por cajera con:
+**Cuentas (personas) y transferencias** — Las **cuentas** (`cajeras.es_cuenta = true`) son personas a las que se les transfiere plata; se administran igual que los cajeros (saldo/movimientos) pero **no apuestan** (no aparecen en apuestas ni en los modales Cargar/Retirar/Ganancia). Una **transferencia** cajero↔cuenta mueve saldo con **comisión** (global, `config.comision_cuenta_pct`, 5% default): el origen baja `monto`, el destino recibe `monto − comisión`, y la comisión es un **gasto que baja el profit histórico y actual**. Tiene su **historial propio** (`transferencias`, botón 🔁 Transferencias en Cajeras y en Reportes). Con filtro de cajera en Reportes la comisión se omite (gasto no atribuible a una cajera).
+
+**Tab Cajeras** — **sub-tabs (chips)** *Cajeros* / *Cuentas*. Card de resumen arriba (Saldo total del tab; en Cajeros además Total apostado). Botón **🔁 Transferir** (elige sentido cajero↔cuenta, monto; preview de comisión y neto) en ambos tabs. Las **cuentas** muestran una card simple (saldo + recibido neto + enviado + botones Transferir/Movimientos, sin toggles de apuesta). Una tarjeta por cajera con:
   - **Saldo disponible** (piso en 0) + **badge de disponibilidad de retiro** (se puede retirar cada **24 h** desde el último retiro: verde **"✅ Retiro disponible"** si pasaron 24 h o nunca retiró, ámbar **"⏳ Retiro disponible en 3 h 20 m"** con cuenta regresiva si falta) + **Apostado (pendiente)** + lista de **Partidos pendientes** con su monto. (Se quitaron los totales históricos cargado/ganado/retirado.) Ordenadas por **última actividad**.
   - **Toggle "Saldo de retiro"** (flag manual): al prenderlo la card se **resalta en verde** (borde + badge). Indica que la cajera ya tiene saldo cargado para retirar; se consume al resolver un partido.
   - **Toggle "🔒 Pendiente de retiro"** (flag manual independiente): al prenderlo la card **y el monto del saldo** se resaltan en **rojo** (bloqueo visual; gana sobre el verde si ambos están activos). Indica que tiene un saldo a la espera de ser retirado y que no se debe tocar hasta hacer el retiro. Solo visual, no afecta cálculos. **Se activa automáticamente** en todas las cajeras de un partido al **resolverlo por primera vez**; se apaga a mano (al hacer el retiro real). Optimista.
   - Botones **💵 Cargar** (casino sale de la cajera, bono auto-completado), **🏧 Retirar**, **💰 Ganancia** (suma al profit, no mueve saldo), **📜 Movimientos** (historial con **fecha y hora** de cada movimiento; cargas/retiros borrables).
 
-**Tab Configuración** — alta/baja de **casas** (tiene cajeras / da apuesta gratis + **Bono % editable**) y **cajeras** (nombre + **casino asociado**).
+**Tab Configuración** — alta/baja de **casas** (tiene cajeras / da apuesta gratis + **Bono % editable**) y **cajeras/cuentas** (nombre + **casino asociado**, o checkbox **👤 Es cuenta** que la crea sin casino y fuera de las apuestas). Card **Ajustes**: **Comisión de cuentas (%)** global editable (`config.comision_cuenta_pct`).
 
 ## 7. Setup desde cero (si hiciera falta)
 1. Crear proyecto en supabase.com → SQL Editor → correr `supabase-schema.sql`.
@@ -139,6 +152,8 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
    7. `migracion-cajera-saldo-retiro.sql` — `cajeras.saldo_retiro`.
    8. `migracion-partido-bono-retiro.sql` — `partidos.bono_retiro`.
    9. `migracion-cajera-pendiente-retiro.sql` — `cajeras.pendiente_retiro`.
+   10. `migracion-partido-bono-apuestas.sql` — `partidos.bono_apuestas`.
+   11. `migracion-cuentas-transferencias.sql` — `cajeras.es_cuenta` + tablas `config` y `transferencias`.
    - `reset-datos.sql` (opcional): borra partidos/apuestas/líneas/movimientos, mantiene casas/cajeras.
 3. Settings → API → copiar URL + publishable/anon key en `config.js`.
 4. Abrir `index.html` (o deployar). En Configuración: setear Bono % de cada casa, marcar "tiene cajeras", y asociar cada cajera a su casino.

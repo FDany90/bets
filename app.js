@@ -24,12 +24,23 @@ const state = {
   partidosById: {},   // id -> partido
   movimientos: [],    // {id, cajera_id, tipo, monto, bono_pct, nota, creado_en}
   retirosGanancia: [],// {id, monto, nota, creado_en} — reparto de ganancias (baja el profit actual)
+  transferencias: [], // {id, origen_id, destino_id, origen_nombre, destino_nombre, monto, comision_pct, comision, nota, creado_en}
+  config: {},         // ajustes globales clave->valor (ej. comision_cuenta_pct)
   apuestas: [],       // {id, partido_id, cajera, premio_cobrado, notas, lineas:[...], _partido}
   partidosColapsados: new Set(), // ids de partidos colapsados (por defecto van desplegados)
   pagina: 1,          // paginado del listado de partidos
   filtroEstado: "Pendiente",  // estado de partido ("" = todos | "Pendiente" | "Finalizado")
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
+  cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
 };
+
+// % de comisión que cobran las cuentas por transferencia (global, configurable).
+const COMISION_CUENTA_DEFAULT = 5;
+function comisionCuentaPct() {
+  const v = state.config.comision_cuenta_pct;
+  return v != null && v !== "" ? num(v) : COMISION_CUENTA_DEFAULT;
+}
+const esCuenta = (c) => !!(c && c.es_cuenta);
 
 // ---------- Helpers ----------
 const num = (v) => {
@@ -76,6 +87,14 @@ const ordenarPartidos = (arr) => [...arr].sort((a, b) => {
   if (hb == null) return -1;
   return ha - hb;
 });
+// Ordena una lista de partidos según su estado: pendientes por fecha/hora
+// ascendente (el próximo primero), finalizados descendente (el más reciente
+// primero). En una lista mixta ("Todos"), los pendientes van arriba.
+const ordenarPartidosPorEstado = (arr) => {
+  const pend = ordenarPartidos(arr.filter((p) => estadoPartido(p) === "Pendiente"));
+  const fin = ordenarPartidos(arr.filter((p) => estadoPartido(p) === "Finalizado")).reverse();
+  return [...pend, ...fin];
+};
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -215,9 +234,18 @@ function bonoEstimadoApuesta(a) {
   }, 0);
 }
 
-// Bono estimado generado por un partido (suma de sus apuestas)
+// Bono estimado generado por un partido (suma de sus apuestas). Se calcula EN VIVO
+// con el bono% actual de cada casa (cambia si se edita el bono).
 function bonoEstimadoPartido(p) {
   return apuestasDePartido(p.id).reduce((s, a) => s + bonoEstimadoApuesta(a), 0);
+}
+
+// Bono de depósito que aporta un partido al profit:
+// - Si ya se resolvió (bono_apuestas guardado, no null) → usa ese SNAPSHOT (congelado
+//   al resolver; editar el bono de una casa después NO lo cambia).
+// - Si todavía no tiene snapshot (pendiente, o resuelto antes de esta feature) → en vivo.
+function bonoPartido(p) {
+  return p && p.bono_apuestas != null ? num(p.bono_apuestas) : bonoEstimadoPartido(p);
 }
 
 // Cajeras distintas (objetos) que participan en las apuestas de un partido.
@@ -336,10 +364,17 @@ function resumenCajera(c) {
   const apostado = aps.reduce((s, a) => s + debitoCajera(a), 0);
   const ganado = aps.reduce((s, a) => s + creditoCajera(a), 0);
 
-  // Apostar descuenta; ganar y cargar suman; retirar resta.
+  // Transferencias: el origen pierde el monto completo; el destino recibe el neto
+  // (monto − comisión). La comisión no vuelve a nadie (es gasto, va contra profit).
+  const transferOut = state.transferencias
+    .filter((t) => t.origen_id === c.id).reduce((s, t) => s + num(t.monto), 0);
+  const transferIn = state.transferencias
+    .filter((t) => t.destino_id === c.id).reduce((s, t) => s + (num(t.monto) - num(t.comision)), 0);
+
+  // Apostar descuenta; ganar y cargar suman; retirar y transferir a otro restan.
   // El saldo nunca queda negativo: piso en 0.
-  const saldo = Math.max(0, cargado + ganado - apostado - retirado);
-  return { saldo, cargado, retirado, apostado, ganado, nApuestas: aps.length };
+  const saldo = Math.max(0, cargado + ganado - apostado - retirado + transferIn - transferOut);
+  return { saldo, cargado, retirado, apostado, ganado, transferIn, transferOut, nApuestas: aps.length };
 }
 
 // Última actividad de una cajera (ms): lo más reciente entre sus movimientos
@@ -418,9 +453,34 @@ async function cargarTodo() {
     lineas: porApuesta[a.id] || [],
     _partido: state.partidosById[a.partido_id] || null,
   }));
+  // Config + transferencias: tolerante (si falta la migración, defaultea a vacío
+  // en vez de romper toda la carga).
+  const [cfg, transf] = await Promise.all([
+    sb.from("config").select("*"),
+    sb.from("transferencias").select("*").order("creado_en", { ascending: false }),
+  ]);
+  state.config = {};
+  if (!cfg.error) cfg.data.forEach((r) => { state.config[r.clave] = r.valor; });
+  state.transferencias = transf.error ? [] : transf.data;
+  congelarBonosResueltos();
   } finally {
     setBusy(false);
   }
+}
+
+// Backfill: los partidos ya resueltos que todavía no tienen el bono de depósito
+// congelado (bono_apuestas == null) se congelan con su valor actual, para que
+// editar el bono% de una casa deje de mover el profit histórico hacia atrás.
+// Congela con el valor de AHORA, así el número mostrado no cambia en el momento.
+function congelarBonosResueltos() {
+  if (!sb) return;
+  const pend = state.partidos.filter((p) => p.resultado_ganador && p.bono_apuestas == null);
+  pend.forEach((p) => {
+    const v = bonoEstimadoPartido(p);
+    p.bono_apuestas = v; // congela en memoria
+    sb.from("partidos").update({ bono_apuestas: v }).eq("id", p.id)
+      .then((r) => { if (r && r.error) p.bono_apuestas = null; }); // revierte si falla (ej. falta migración)
+  });
 }
 
 function mostrarError(msg) {
@@ -526,7 +586,7 @@ function viewReportes() {
   const f = state.filtroRep;
   const periodos = [["todo", "Todo"], ["semana", "Última semana"], ["mes", "Último mes"], ["custom", "Personalizado"]];
   const optPeriodo = periodos.map(([v, t]) => `<option value="${v}" ${f.periodo === v ? "selected" : ""}>${t}</option>`).join("");
-  const optCajera = state.cajeras.map((c) => `<option ${f.cajera === c.nombre ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+  const optCajera = state.cajeras.filter((c) => !esCuenta(c)).map((c) => `<option ${f.cajera === c.nombre ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
   const cust = f.periodo === "custom";
 
   return `
@@ -557,13 +617,29 @@ function renderReporteResultados() {
   const pctProm = resueltas.length
     ? resueltas.reduce((s, x) => s + (x.c.pct || 0), 0) / resueltas.length : null;
 
+  // Partidos resueltos dentro del alcance de los filtros (para el bono de depósito,
+  // que ahora es un snapshot por partido). Con filtro de cajera se omite (igual que
+  // el bono por saldo de retiro): no se puede subdividir por cajera.
+  const partidosResueltosScope = state.filtroRep.cajera ? [] :
+    [...new Set(resueltas.map((x) => x.a.partido_id).filter(Boolean))]
+      .map((pid) => state.partidosById[pid]).filter(Boolean);
+  const bonoPorPartidoMes = {};
+  partidosResueltosScope.forEach((p) => {
+    const k = (p.fecha || "").slice(0, 7) || "sin fecha";
+    bonoPorPartidoMes[k] = (bonoPorPartidoMes[k] || 0) + bonoPartido(p);
+  });
+
   const porMes = {};
   resueltas.forEach((x) => {
     const fecha = apuestaFecha(x.a);
     const k = fecha ? fecha.slice(0, 7) : "sin fecha";
     (porMes[k] ||= { profit: 0, n: 0 });
-    porMes[k].profit += x.c.profit + bonoEstimadoApuesta(x.a); // profit + bono estimado
+    porMes[k].profit += x.c.profit; // solo profit real; el bono de depósito se suma por partido
     porMes[k].n++;
+  });
+  // Suma el bono de depósito (snapshot por partido) al mes correspondiente
+  Object.entries(bonoPorPartidoMes).forEach(([k, v]) => {
+    (porMes[k] ||= { profit: 0, n: 0 }).profit += v;
   });
   const porCajera = {};
   resueltas.forEach((x) => {
@@ -589,8 +665,8 @@ function renderReporteResultados() {
   const pendientes = calc.filter((x) => x.c.estado === "Pendiente");
   const pendientesTotal = pendientes.reduce((s, x) => s + x.c.ingresado, 0);
 
-  // Profit total = "profit + bono estimado" de las apuestas resueltas + ganancias manuales
-  const bonoGanado = resueltas.reduce((s, x) => s + bonoEstimadoApuesta(x.a), 0);
+  // Profit total = profit real de resueltas + bono de depósito (snapshot por partido) + ganancias manuales
+  const bonoGanado = partidosResueltosScope.reduce((s, p) => s + bonoPartido(p), 0);
   // Ganancias cargadas a mano (no mueven saldo; cuentan como profit). Respeta período + cajera.
   const f = state.filtroRep;
   const { desde, hasta } = rangoReporte();
@@ -618,7 +694,16 @@ function renderReporteResultados() {
       return true;
     })
     .reduce((s, p) => s + num(p.bono_retiro), 0);
-  const profitConBono = profitTotal + bonoGanado + gananciaManual + bonoRetiroTotal;
+  // Comisiones de cuentas (gasto real): bajan el profit HISTÓRICO (y por lo tanto
+  // el actual). Respeta período por creado_en. Con filtro de cajera se omite
+  // (es un gasto global entre cajero/cuenta, no atribuible a una sola cajera).
+  const comisionesTotal = f.cajera ? 0 : state.transferencias.filter((t) => {
+    const fecha = (t.creado_en || "").slice(0, 10);
+    if (desde && fecha < desde) return false;
+    if (hasta && fecha > hasta) return false;
+    return true;
+  }).reduce((s, t) => s + num(t.comision), 0);
+  const profitConBono = profitTotal + bonoGanado + gananciaManual + bonoRetiroTotal - comisionesTotal;
   // Retiros de ganancia (reparto): bajan el profit ACTUAL, no el histórico. Respeta período.
   const retirosTotal = state.retirosGanancia.filter((r) => {
     const fecha = (r.creado_en || "").slice(0, 10);
@@ -633,6 +718,7 @@ function renderReporteResultados() {
     <div class="toolbar" style="margin-bottom:14px">
       <button class="btn-ghost btn-sm" id="retirar-ganancia">💸 Retirar ganancia</button>
       <button class="btn-ghost btn-sm" id="ver-retiros">📜 Retiros (${state.retirosGanancia.length})</button>
+      <button class="btn-ghost btn-sm" id="ver-transferencias">🔁 Transferencias (${state.transferencias.length})</button>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="label">Profit total actual</div><div class="value ${profitActual >= 0 ? "pos" : "neg"}">${money(profitActual)}</div></div>
@@ -641,6 +727,7 @@ function renderReporteResultados() {
       <div class="kpi"><div class="label">Total ingresado</div><div class="value">${money(ingresadoTotal)}</div></div>
       <div class="kpi"><div class="label">Total saldo cajeras actual</div><div class="value ${saldoCajeras >= 0 ? "pos" : "neg"}">${money(saldoCajeras)}</div></div>
       <div class="kpi"><div class="label">Total en apuestas pendientes</div><div class="value">${money(pendientesTotal)}<span class="muted" style="font-size:14px"> · ${pendientes.length}</span></div></div>
+      ${comisionesTotal > 0 ? `<div class="kpi"><div class="label">Comisiones cuentas</div><div class="value neg">−${money(comisionesTotal)}</div></div>` : ""}
       <div class="kpi"><div class="label">Apuestas resueltas</div><div class="value">${resueltas.length}<span class="muted" style="font-size:14px"> / ${lista.length}</span></div></div>
       <div class="kpi"><div class="label">% promedio</div><div class="value">${pct(pctProm)}</div></div>
     </div>
@@ -661,6 +748,7 @@ function renderReporteResultados() {
   // botones de retiro de ganancia (se recrean en cada render de resultados)
   $("#retirar-ganancia")?.addEventListener("click", () => abrirRetirarGanancia());
   $("#ver-retiros")?.addEventListener("click", () => abrirRetirosGanancia());
+  $("#ver-transferencias")?.addEventListener("click", () => abrirTransferencias());
 }
 
 function bindReportes() {
@@ -769,9 +857,13 @@ function viewPartidos() {
   const cont = { "": state.partidos.length, Pendiente: 0, Finalizado: 0 };
   state.partidos.forEach((p) => { cont[estadoPartido(p)]++; });
 
-  const lista = ordenarPartidos(state.filtroEstado
+  // Pendientes: fecha/hora ascendente (el próximo primero).
+  // Finalizados: descendente (el más reciente primero).
+  // "Todos": pendientes arriba (ascendente) y finalizados abajo (descendente).
+  const filtrados = state.filtroEstado
     ? state.partidos.filter((p) => estadoPartido(p) === state.filtroEstado)
-    : state.partidos);
+    : state.partidos;
+  const lista = ordenarPartidosPorEstado(filtrados);
 
   const total = lista.length;
   const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -846,7 +938,7 @@ function filaApuesta(a) {
 function cardPartido(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
-  const bonoEst = bonoEstimadoPartido(p);
+  const bonoEst = bonoPartido(p); // snapshot si está resuelto; estimado en vivo si pendiente
   const bonoRet = num(p.bono_retiro);
   const bonoTotal = bonoEst + bonoRet;
   const abierto = !state.partidosColapsados.has(p.id);
@@ -878,9 +970,9 @@ function cardPartido(p) {
       <span>${cp.n} apuesta(s)</span>
       <span>Ingresado: <b>${money(cp.ingresado)}</b></span>
       ${cp.profitDef ? `<span>Profit: <b class="${cp.profit >= 0 ? "pos" : "neg"}">${money(cp.profit)}</b></span>` : ""}
-      ${bonoEst > 0 ? `<span>Bono estimado: <b class="pos">${money(bonoEst)}</b></span>` : ""}
+      ${bonoEst > 0 ? `<span>${est === "Finalizado" ? "Bono depósito" : "Bono estimado"}: <b class="pos">${money(bonoEst)}</b></span>` : ""}
       ${bonoRet > 0 ? `<span>Bono retiro: <b class="pos">${money(bonoRet)}</b></span>` : ""}
-      ${cp.profitDef && bonoTotal > 0 ? `<span>Profit + bono (est.): <b class="pos">${money(cp.profit + bonoTotal)}</b></span>` : ""}
+      ${cp.profitDef && bonoTotal > 0 ? `<span>Profit + bono${est === "Finalizado" ? "" : " (est.)"}: <b class="pos">${money(cp.profit + bonoTotal)}</b></span>` : ""}
     </div>
     ${abierto ? `
     ${premioPorResultadoHtml(p, est)}
@@ -1035,7 +1127,7 @@ function abrirModal(apuesta, partidoId) {
 }
 
 function selectCajera(sel) {
-  const opts = state.cajeras.map((c) => `<option ${c.nombre === sel ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+  const opts = state.cajeras.filter((c) => !esCuenta(c)).map((c) => `<option ${c.nombre === sel ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
   return `<select name="cajera"><option value="">— elegir —</option>${opts}</select>`;
 }
 
@@ -1083,7 +1175,7 @@ function renderLineasNueva(dlg) {
   const cont = $("#lineas", dlg);
   cont.innerHTML = modalLineas.map((l, i) => {
     const c = calcLinea(l);
-    const cajeraOpts = state.cajeras.map((x) => `<option ${x.nombre === l.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+    const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x)).map((x) => `<option ${x.nombre === l.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const casaOpts = state.casas.map((x) => `<option ${x.nombre === l.casa ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const gratisField = casaPermiteGratis(l.casa)
       ? `<div><label>🎁 Apuesta gratis</label><input type="number" step="any" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
@@ -1414,6 +1506,11 @@ function abrirResolverPartido(p) {
           </select>
         </div>
         <p class="muted" style="margin:10px 0 0">Cada apuesta se resuelve sola según este resultado.</p>
+        <div id="r-bono-wrap" style="margin-top:14px; display:none">
+          <label>Bono de depósito de este partido (se congela al guardar)</label>
+          <input type="number" step="any" name="bono_apuestas" />
+          <p class="muted" style="margin:6px 0 0;font-size:12px">Default = bono calculado con el % actual de la casa. Podés editarlo; queda guardado y no cambia aunque después edites el bono de la casa.</p>
+        </div>
         <div id="r-preview" style="margin-top:14px"></div>
       </div>
       <div class="modal-foot">
@@ -1443,14 +1540,15 @@ function abrirResolverPartido(p) {
         <td class="num ${c.profit == null ? "" : c.profit >= 0 ? "pos" : "neg"}">${c.profit == null ? "—" : money(c.profit)}</td>
       </tr>`;
     }).join("");
-    const bonoEst = res ? bonoEstimadoPartido(p) : 0;
+    $("#r-bono-wrap", dlg).style.display = res ? "block" : "none";
+    const bonoEst = res ? num(f.bono_apuestas.value) : 0;
     const bonoRet = res ? bonoRetiroPartido(p) : 0;
     const totalConBono = totalProfit + bonoEst + bonoRet;
     // Totales (solo cuando se eligió un resultado)
     const totales = res ? `
       <div class="resolver-totales">
         <div class="rt-row"><span>Profit total cajeras</span><b class="${totalProfit >= 0 ? "pos" : "neg"}">${money(totalProfit)}</b></div>
-        ${bonoEst > 0 ? `<div class="rt-row"><span>Bono estimado</span><b class="pos">+${money(bonoEst)}</b></div>` : ""}
+        ${bonoEst > 0 ? `<div class="rt-row"><span>Bono de depósito</span><b class="pos">+${money(bonoEst)}</b></div>` : ""}
         ${bonoRet > 0 ? `<div class="rt-row"><span>Bono por saldo de retiro</span><b class="pos">+${money(bonoRet)}</b></div>` : ""}
         <div class="rt-total"><span>Total</span><b class="${totalConBono >= 0 ? "pos" : "neg"}">${money(totalConBono)}</b></div>
       </div>${bonoRet > 0 ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar se desactiva el “saldo de retiro” de esas cajeras (se cuenta una sola vez).</p>` : ""}${!p.resultado_ganador ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar, las cajeras de este partido quedan en <b style="color:var(--danger)">🔒 Pendiente de retiro</b> (rojas) hasta que hagas el retiro.</p>` : ""}` : "";
@@ -1459,7 +1557,10 @@ function abrirResolverPartido(p) {
       <tbody>${rows || `<tr><td colspan="5" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>${totales}`;
   };
 
+  // Default del bono de depósito: snapshot guardado si existe, si no el estimado en vivo.
+  f.bono_apuestas.value = Math.round(bonoPartido(p));
   f.resultado_ganador.addEventListener("change", preview);
+  f.bono_apuestas.addEventListener("input", preview);
   preview();
 
   f.addEventListener("submit", (e) => {
@@ -1474,10 +1575,16 @@ async function resolverPartido(dlg, id) {
   const p = state.partidosById[id];
   const res = f.resultado_ganador.value || null;
   const eraPendiente = !(p && p.resultado_ganador);
+  const bonoApuestas = num(f.bono_apuestas.value);
 
   const update = { resultado_ganador: res };
   let cajerasConsumidas = [];
   let cajerasABloquear = [];
+  if (res) {
+    // Congela el bono de depósito editado en el popup (snapshot). No cambia
+    // aunque después se edite el bono% de la casa.
+    update.bono_apuestas = bonoApuestas;
+  }
   if (res && eraPendiente) {
     // Primera resolución: snapshot del bono (saldos del momento) y se "consume"
     // el saldo de retiro de esas cajeras → se desactiva el check para no contarlo
@@ -1489,6 +1596,7 @@ async function resolverPartido(dlg, id) {
     cajerasABloquear = cajerasDePartido(p).filter((c) => !c.pendiente_retiro);
   } else if (!res) {
     update.bono_retiro = 0; // vuelve a pendiente: se anula el bono
+    update.bono_apuestas = null; // vuelve a pendiente: se descongela
   }
   // re-resolución (ya estaba finalizado): mantiene el bono_retiro guardado
 
@@ -1517,21 +1625,66 @@ async function resolverPartido(dlg, id) {
 // ============================================================
 function viewCajeras() {
   if (!state.cajeras.length) {
-    return `<div class="card"><p class="muted">No hay cajeras todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
+    return `<div class="card"><p class="muted">No hay cajeras ni cuentas todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
   }
+  const cajeros = state.cajeras.filter((c) => !esCuenta(c));
+  const cuentas = state.cajeras.filter((c) => esCuenta(c));
+  const tab = state.cajerasTab === "cuenta" ? "cuenta" : "cajero";
 
-  // Orden: las cajeras con actividad más reciente (carga/apuesta) primero;
-  // las que no tuvieron nada recientemente quedan al final.
-  const ordenadas = [...state.cajeras].sort((a, b) => ultimaActividadCajera(b) - ultimaActividadCajera(a));
+  // Orden: actividad más reciente primero.
+  const lista = (tab === "cuenta" ? cuentas : cajeros)
+    .slice().sort((a, b) => ultimaActividadCajera(b) - ultimaActividadCajera(a));
 
-  const cards = ordenadas.map((c) => {
-    const r = resumenCajera(c);
-    const casa = casaDeCajera(c);
-    const pend = partidosPendientesCajera(c);
-    const apostadoPend = pend.reduce((s, x) => s + x.monto, 0);
-    const conRetiro = !!c.saldo_retiro;
-    const conPendiente = !!c.pendiente_retiro;
-    return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""}">
+  const chips = [["cajero", "Cajeros", cajeros.length], ["cuenta", "Cuentas", cuentas.length]]
+    .map(([v, t, n]) => `<button class="chip-f ${tab === v ? "active" : ""}" data-cajtab="${v}">${t} <span class="chip-n">${n}</span></button>`).join("");
+
+  const cards = lista.length
+    ? lista.map(tab === "cuenta" ? cardCuenta : cardCajero).join("")
+    : `<div class="card"><p class="muted">${tab === "cuenta"
+        ? "No hay cuentas. Creá una en Configuración marcando “👤 Es cuenta”."
+        : "No hay cajeros todavía."}</p></div>`;
+
+  const saldoTotal = lista.reduce((s, c) => s + resumenCajera(c).saldo, 0);
+
+  const toolbar = tab === "cuenta"
+    ? `<div class="toolbar">
+        <button class="btn-primary" id="transferir">🔁 Transferir</button>
+        <button class="btn-ghost" id="ver-transf">📜 Transferencias</button>
+        <div class="spacer"></div>
+        <span class="muted">Comisión ${comisionCuentaPct()}% · ${cuentas.length} cuenta(s)</span>
+      </div>`
+    : `<div class="toolbar">
+        <button class="btn-primary" id="cargar-saldo">💵 Cargar saldo</button>
+        <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
+        <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
+        <button class="btn-ghost" id="transferir">🔁 Transferir</button>
+        <div class="spacer"></div>
+        <span class="muted">${cajeros.length} cajero(s)</span>
+      </div>`;
+
+  const apostadoTotal = tab === "cuenta" ? 0
+    : lista.reduce((s, c) => s + partidosPendientesCajera(c).reduce((t, x) => t + x.monto, 0), 0);
+
+  return `<div class="card">
+      <div class="kpis">
+        <div class="kpi"><div class="label">Saldo total ${tab === "cuenta" ? "cuentas" : "cajeros"}</div><div class="value ${saldoTotal >= 0 ? "pos" : "neg"}">${money(saldoTotal)}</div></div>
+        ${tab === "cuenta" ? "" : `<div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>`}
+      </div>
+    </div>
+    <div class="chips-filtro">${chips}</div>
+    ${toolbar}${cards}`;
+}
+
+// Card de un cajero (billetera para apostar): saldo, toggles de retiro, pendientes.
+function cardCajero(c) {
+  const r = resumenCajera(c);
+  const casa = casaDeCajera(c);
+  const pend = partidosPendientesCajera(c);
+  const apostadoPend = pend.reduce((s, x) => s + x.monto, 0);
+  const conRetiro = !!c.saldo_retiro;
+  const conPendiente = !!c.pendiente_retiro;
+  const er = estadoRetiroCajera(c);
+  return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""}">
       <div class="cajera-head">
         <div class="cajera-title">
           <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
@@ -1557,12 +1710,9 @@ function viewCajeras() {
         <span class="label">Saldo disponible</span>
         <span class="value ${conPendiente ? "bloqueado" : r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
       </div>
-      ${(() => {
-        const er = estadoRetiroCajera(c);
-        return er.disponible
-          ? `<div class="retiro-badge ok">✅ Retiro disponible</div>`
-          : `<div class="retiro-badge wait">⏳ Retiro disponible en ${fmtDuracion(er.faltaMs)}</div>`;
-      })()}
+      ${er.disponible
+        ? `<div class="retiro-badge ok">✅ Retiro disponible</div>`
+        : `<div class="retiro-badge wait">⏳ Retiro disponible en ${fmtDuracion(er.faltaMs)}</div>`}
       <div class="cajera-desglose">
         <span>Apostado (pendiente) <b>${money(apostadoPend)}</b></span>
       </div>
@@ -1576,36 +1726,44 @@ function viewCajeras() {
           : `<span class="muted" style="font-size:13px">Sin apuestas pendientes</span>`}
       </div>
     </div>`;
-  }).join("");
+}
 
-  // Totales de todas las cajeras (saldo actual y plata apostada en pendientes)
-  const saldoTotal = state.cajeras.reduce((s, c) => s + resumenCajera(c).saldo, 0);
-  const apostadoTotal = state.cajeras.reduce(
-    (s, c) => s + partidosPendientesCajera(c).reduce((t, x) => t + x.monto, 0), 0);
-
-  return `<div class="card">
-      <div class="kpis">
-        <div class="kpi"><div class="label">Saldo total</div><div class="value ${saldoTotal >= 0 ? "pos" : "neg"}">${money(saldoTotal)}</div></div>
-        <div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>
+// Card de una cuenta (persona): saldo administrado + neto recibido/enviado. No apuesta.
+function cardCuenta(c) {
+  const r = resumenCajera(c);
+  return `<div class="card cajera cuenta">
+      <div class="cajera-head">
+        <div class="cajera-title">
+          <h2 style="margin:0">${esc(c.nombre)} <span class="muted" style="font-size:13px;font-weight:400">· 👤 Cuenta</span></h2>
+        </div>
+        <div class="acc-right">
+          <button class="btn-primary btn-sm" data-transf="${c.id}">🔁 Transferir</button>
+          <button class="btn-ghost btn-sm" data-movs="${c.id}">📜 Movimientos</button>
+        </div>
       </div>
-    </div>
-    <div class="toolbar">
-      <button class="btn-primary" id="cargar-saldo">💵 Cargar saldo</button>
-      <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
-      <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
-      <div class="spacer"></div>
-      <span class="muted">${state.cajeras.length} cajera(s)</span>
-    </div>${cards}`;
+      <div class="cajera-saldo">
+        <span class="label">Saldo en la cuenta</span>
+        <span class="value ${r.saldo >= 0 ? "pos" : "neg"}">${money(r.saldo)}</span>
+      </div>
+      <div class="cajera-desglose">
+        <span>Recibido (neto) <b>${money(r.transferIn)}</b></span>
+        <span>Enviado <b>${money(r.transferOut)}</b></span>
+      </div>
+    </div>`;
 }
 
 function bindCajeras() {
   const byId = (id) => state.cajeras.find((c) => c.id === id);
+  $$("[data-cajtab]").forEach((b) => b.addEventListener("click", () => { state.cajerasTab = b.dataset.cajtab; render(); }));
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
+  $("#transferir")?.addEventListener("click", () => abrirTransferir(null));
+  $("#ver-transf")?.addEventListener("click", () => abrirTransferencias());
   $$("[data-ganancia]").forEach((b) => b.addEventListener("click", () => abrirGanancia(byId(b.dataset.ganancia))));
   $$("[data-cargar]").forEach((b) => b.addEventListener("click", () => abrirCargar(byId(b.dataset.cargar))));
   $$("[data-retirar]").forEach((b) => b.addEventListener("click", () => abrirRetirar(byId(b.dataset.retirar))));
+  $$("[data-transf]").forEach((b) => b.addEventListener("click", () => abrirTransferir(byId(b.dataset.transf))));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
   $$("[data-retiro-toggle]").forEach((cb) => cb.addEventListener("change", () => toggleSaldoRetiro(cb.dataset.retiroToggle, cb.checked)));
   $$("[data-pendiente-toggle]").forEach((cb) => cb.addEventListener("change", () => togglePendienteRetiro(cb.dataset.pendienteToggle, cb.checked)));
@@ -1647,7 +1805,7 @@ async function togglePendienteRetiro(cajeraId, valor) {
 function abrirCargar(cajeraFija) {
   if (!state.cajeras.length) { alert("No hay cajeras. Agregá una en Configuración."); return; }
   const seleccionable = !cajeraFija;
-  const cajeraOpts = state.cajeras
+  const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x))
     .map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join("");
 
   const dlg = document.createElement("dialog");
@@ -1736,7 +1894,7 @@ function abrirCargar(cajeraFija) {
 function abrirRetirar(cajeraFija) {
   if (!state.cajeras.length) { alert("No hay cajeras. Agregá una en Configuración."); return; }
   const seleccionable = !cajeraFija;
-  const cajeraOpts = state.cajeras
+  const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x))
     .map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join("");
 
   const dlg = document.createElement("dialog");
@@ -1803,7 +1961,7 @@ function abrirRetirar(cajeraFija) {
 function abrirGanancia(cajeraFija) {
   if (!state.cajeras.length) { alert("No hay cajeras. Agregá una en Configuración."); return; }
   const seleccionable = !cajeraFija;
-  const cajeraOpts = state.cajeras
+  const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x))
     .map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join("");
 
   const dlg = document.createElement("dialog");
@@ -1867,6 +2025,19 @@ function abrirMovimientos(c) {
     if (deb > 0) items.push({ fecha: a.creado_en, tipo: "Apuesta", detalle: nombrePartido, efecto: -deb });
     const cre = creditoCajera(a);
     if (cre > 0) items.push({ fecha: a.creado_en, tipo: "Premio", detalle: nombrePartido, efecto: cre });
+  });
+  // Transferencias donde participa (origen o destino).
+  state.transferencias.filter((t) => t.origen_id === c.id || t.destino_id === c.id).forEach((t) => {
+    const esOrigen = t.origen_id === c.id;
+    const otro = esOrigen ? (t.destino_nombre || "—") : (t.origen_nombre || "—");
+    items.push({
+      fecha: t.creado_en,
+      tipo: "Transferencia",
+      detalle: esOrigen
+        ? `→ ${otro}${num(t.comision) > 0 ? ` · comisión ${money(num(t.comision))}` : ""}`
+        : `← ${otro} (neto)`,
+      efecto: esOrigen ? -num(t.monto) : (num(t.monto) - num(t.comision)),
+    });
   });
   items.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
 
@@ -1959,6 +2130,186 @@ function guardarMovimiento(payload) {
 }
 
 // ============================================================
+//   TRANSFERENCIAS (cajero ↔ cuenta, con comisión)
+// ============================================================
+// cuentaFija opcional: precarga esa cuenta en el selector.
+function abrirTransferir(cuentaFija) {
+  const cajeros = state.cajeras.filter((c) => !esCuenta(c));
+  const cuentas = state.cajeras.filter((c) => esCuenta(c));
+  if (!cajeros.length || !cuentas.length) {
+    alert("Necesitás al menos un cajero y una cuenta. Creá una cuenta en Configuración marcando “Es cuenta”.");
+    return;
+  }
+  const cp = comisionCuentaPct();
+  const cajeroOpts = cajeros.map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join("");
+  const cuentaOpts = cuentas.map((x) => `<option value="${x.id}" ${cuentaFija && x.id === cuentaFija.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-transf">
+      <div class="modal-head">
+        <h2 style="margin:0">🔁 Transferir</h2>
+        <button type="button" class="btn-ghost btn-sm" id="t-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid grid-2">
+          <div><label>Sentido</label>
+            <select name="dir">
+              <option value="cajero_a_cuenta">Cajero → Cuenta</option>
+              <option value="cuenta_a_cajero">Cuenta → Cajero</option>
+            </select>
+          </div>
+          <div><label>Monto a transferir</label><input type="number" step="any" name="monto" placeholder="100000" required autofocus /></div>
+          <div><label>Cajero</label><select name="cajero_id">${cajeroOpts}</select></div>
+          <div><label>Cuenta</label><select name="cuenta_id">${cuentaOpts}</select></div>
+        </div>
+        <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Transferencia" /></div>
+        <div id="t-resumen" class="resolver-totales" style="margin-top:14px"></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="t-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Transferir</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  const f = $("#form-transf", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#t-cerrar", dlg).addEventListener("click", cerrar);
+  $("#t-cancelar", dlg).addEventListener("click", cerrar);
+
+  // Devuelve { origen, destino } según el sentido elegido.
+  const partes = () => {
+    const cajero = cajeros.find((x) => x.id === f.cajero_id.value);
+    const cuenta = cuentas.find((x) => x.id === f.cuenta_id.value);
+    return f.dir.value === "cuenta_a_cajero"
+      ? { origen: cuenta, destino: cajero }
+      : { origen: cajero, destino: cuenta };
+  };
+  const refrescar = () => {
+    const { origen, destino } = partes();
+    const monto = num(f.monto.value);
+    const comision = monto * cp / 100;
+    const neto = monto - comision;
+    const saldoOrigen = origen ? resumenCajera(origen).saldo : 0;
+    const insuf = monto > saldoOrigen;
+    $("#t-resumen", dlg).innerHTML = `
+      <div class="rt-row"><span>De <b>${esc(origen ? origen.nombre : "—")}</b></span><b class="neg">−${money(monto)}</b></div>
+      <div class="rt-row"><span>Comisión (${cp}%)</span><b class="neg">−${money(comision)}</b></div>
+      <div class="rt-row"><span>Recibe <b>${esc(destino ? destino.nombre : "—")}</b></span><b class="pos">+${money(neto)}</b></div>
+      <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - monto >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - monto))}</b></div>
+      ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor al monto.</p>` : ""}`;
+  };
+  ["change", "input"].forEach((ev) => f.addEventListener(ev, refrescar));
+  refrescar();
+
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const { origen, destino } = partes();
+    if (!origen || !destino) { alert("Elegí cajero y cuenta."); return; }
+    const monto = num(f.monto.value);
+    const comision = monto * cp / 100;
+    const payload = {
+      origen_id: origen.id,
+      destino_id: destino.id,
+      origen_nombre: origen.nombre,
+      destino_nombre: destino.nombre,
+      monto,
+      comision_pct: cp,
+      comision,
+      nota: f.nota.value.trim() || null,
+    };
+    if (guardarTransferencia(payload)) cerrar();
+  });
+}
+
+// Persiste una transferencia con actualización OPTIMISTA (como guardarMovimiento).
+function guardarTransferencia(payload) {
+  if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
+  if (!(num(payload.monto) > 0)) { alert("Ingresá un monto mayor a 0."); return false; }
+  if (payload.origen_id === payload.destino_id) { alert("El origen y el destino no pueden ser el mismo."); return false; }
+
+  const tempId = "tmp-" + (++_tmpSeq);
+  state.transferencias.unshift({ ...payload, id: tempId, creado_en: new Date().toISOString() });
+  render();
+
+  setBusy(true);
+  sb.from("transferencias").insert(payload).select().single()
+    .then(({ data, error }) => {
+      const i = state.transferencias.findIndex((t) => t.id === tempId);
+      if (error) {
+        if (i >= 0) state.transferencias.splice(i, 1); // revierte
+        mostrarError("No se pudo guardar la transferencia: " + error.message);
+      } else if (i >= 0) {
+        state.transferencias[i] = data;
+      }
+      render();
+    })
+    .finally(() => setBusy(false));
+  return true;
+}
+
+// Historial de transferencias (con su comisión). Separado del de retiros.
+function abrirTransferencias() {
+  const rows = state.transferencias.map((t) => {
+    const fh = fmtFechaHoraPartes(t.creado_en);
+    return `<tr>
+      <td><div>${esc(fh.fecha)}</div>${fh.hora ? `<div class="muted" style="font-size:12px">${esc(fh.hora)} hs</div>` : ""}</td>
+      <td>${esc(t.origen_nombre || "—")} → ${esc(t.destino_nombre || "—")}${t.nota ? ` <span class="muted">· ${esc(t.nota)}</span>` : ""}</td>
+      <td class="num">${money(num(t.monto))}</td>
+      <td class="num neg">−${money(num(t.comision))}</td>
+      <td class="num pos">${money(num(t.monto) - num(t.comision))}</td>
+      <td><button type="button" class="btn-danger btn-sm" data-del-transf="${t.id}" title="Borrar">🗑️</button></td>
+    </tr>`;
+  }).join("");
+  const totalComision = state.transferencias.reduce((s, t) => s + num(t.comision), 0);
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-transf-hist">
+      <div class="modal-head">
+        <h2 style="margin:0">🔁 Transferencias</h2>
+        <button type="button" class="btn-ghost btn-sm" id="th-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Fecha</th><th>De → A</th><th class="num">Monto</th><th class="num">Comisión</th><th class="num">Neto</th><th></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="muted">Sin transferencias.</td></tr>`}</tbody>
+        </table></div>
+        <p class="muted" style="margin:10px 0 0">Comisión total (todas): <b class="neg">−${money(totalComision)}</b>. Se descuenta del profit. Borrar una revierte el saldo y la comisión.</p>
+      </div>
+      <div class="modal-foot">
+        <button type="submit" class="btn-primary">Cerrar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#th-cerrar", dlg).addEventListener("click", cerrar);
+  $("#form-transf-hist", dlg).addEventListener("submit", (e) => { e.preventDefault(); cerrar(); });
+  $$("[data-del-transf]", dlg).forEach((b) => b.addEventListener("click", () => borrarTransferencia(b.dataset.delTransf, dlg)));
+}
+
+async function borrarTransferencia(id, dlg) {
+  if (!confirm("¿Borrar esta transferencia? El saldo y la comisión se revierten.")) return;
+  const backup = [...state.transferencias];
+  state.transferencias = state.transferencias.filter((t) => t.id !== id);
+  render();
+  dlg.close(); dlg.remove();
+  abrirTransferencias(); // reabrir ya sin la fila
+
+  setBusy(true);
+  const { error } = await sb.from("transferencias").delete().eq("id", id);
+  setBusy(false);
+  if (error) {
+    state.transferencias = backup; // revierte
+    render();
+    mostrarError("No se pudo borrar la transferencia: " + error.message);
+  }
+}
+
+// ============================================================
 //   VISTA: CONFIGURACIÓN (casas y cajeras)
 // ============================================================
 // Opciones de casino para una cajera (prioriza casas con cajeras)
@@ -1976,8 +2327,8 @@ function viewConfig() {
     <button class="btn-danger btn-sm" data-del-casa="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
-    <span class="cajera-cfg-nombre">${esc(c.nombre)}</span>
-    <select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>
+    <span class="cajera-cfg-nombre">${esc(c.nombre)}${esCuenta(c) ? ` <span class="muted">· 👤 cuenta</span>` : ""}</span>
+    ${esCuenta(c) ? `<span class="muted">sin casino</span>` : `<select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>`}
     <button class="btn-danger btn-sm" data-del-cajera="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
 
@@ -1998,13 +2349,24 @@ function viewConfig() {
       </div>
     </div>
     <div class="card">
-      <h2>Cajeras</h2>
+      <h2>Cajeras y cuentas</h2>
       <div style="margin-bottom:14px">${cajeras || `<span class="muted">Sin cajeras</span>`}</div>
       <div class="row">
         <div class="field"><label>Nombre</label><input id="cajera-nombre" placeholder="Ej. Julieta Principal Daalber" /></div>
         <div class="field"><label>Casino</label><select id="cajera-casa">${opcionesCasaCajera(null)}</select></div>
-        <button class="btn-primary" id="add-cajera">Agregar cajera</button>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="cajera-es-cuenta" style="width:auto" /> 👤 Es cuenta (persona, no apuesta)
+        </label>
+        <button class="btn-primary" id="add-cajera">Agregar</button>
       </div>
+      <p class="muted" style="margin:8px 0 0">Una <b>cuenta</b> es una persona a la que le transferís plata (no se apuesta con ella, no se asocia a casino).</p>
+    </div>
+    <div class="card">
+      <h2>Ajustes</h2>
+      <div class="row">
+        <div class="field"><label>Comisión de cuentas (%)</label><input id="comision-pct" type="number" step="any" value="${comisionCuentaPct()}" style="max-width:140px" /></div>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Se cobra en cada transferencia entre cajero y cuenta y se descuenta del profit.</p>
     </div>
   `;
 }
@@ -2025,7 +2387,18 @@ function bindConfig() {
   $("#add-cajera")?.addEventListener("click", async () => {
     const nombre = $("#cajera-nombre").value.trim();
     if (!nombre) return;
-    const { error } = await sb.from("cajeras").insert({ nombre, casa_id: $("#cajera-casa").value || null });
+    const esCta = $("#cajera-es-cuenta")?.checked;
+    const { error } = await sb.from("cajeras").insert({
+      nombre,
+      es_cuenta: !!esCta,
+      casa_id: esCta ? null : ($("#cajera-casa").value || null),
+    });
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  });
+  $("#comision-pct")?.addEventListener("change", async (e) => {
+    const { error } = await sb.from("config")
+      .upsert({ clave: "comision_cuenta_pct", valor: String(num(e.target.value)) });
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   });
