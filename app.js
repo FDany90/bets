@@ -2264,13 +2264,17 @@ function abrirTransferir(cuentaFija) {
   const refrescar = () => {
     const { origen, destino } = partes();
     const monto = num(f.monto.value);
-    const comision = monto * cp / 100;
+    // La comisión se cobra SOLO cuando el dinero entra a una cuenta (cajero → cuenta).
+    const cobraComision = esCuenta(destino);
+    const comision = cobraComision ? monto * cp / 100 : 0;
     const neto = monto - comision;
     const saldoOrigen = origen ? resumenCajera(origen).saldo : 0;
     const insuf = monto > saldoOrigen;
     $("#t-resumen", dlg).innerHTML = `
       <div class="rt-row"><span>De <b>${esc(origen ? origen.nombre : "—")}</b></span><b class="neg">−${money(monto)}</b></div>
-      <div class="rt-row"><span>Comisión (${cp}%)</span><b class="neg">−${money(comision)}</b></div>
+      ${cobraComision
+        ? `<div class="rt-row"><span>Comisión (${cp}%)</span><b class="neg">−${money(comision)}</b></div>`
+        : `<div class="rt-row"><span>Comisión</span><b class="muted">sin comisión (cuenta → cajero)</b></div>`}
       <div class="rt-row"><span>Recibe <b>${esc(destino ? destino.nombre : "—")}</b></span><b class="pos">+${money(neto)}</b></div>
       <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - monto >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - monto))}</b></div>
       ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor al monto.</p>` : ""}`;
@@ -2283,14 +2287,16 @@ function abrirTransferir(cuentaFija) {
     const { origen, destino } = partes();
     if (!origen || !destino) { alert("Elegí cajero y cuenta."); return; }
     const monto = num(f.monto.value);
-    const comision = monto * cp / 100;
+    // Comisión solo cuando entra a una cuenta (cajero → cuenta).
+    const cobraComision = esCuenta(destino);
+    const comision = cobraComision ? monto * cp / 100 : 0;
     const payload = {
       origen_id: origen.id,
       destino_id: destino.id,
       origen_nombre: origen.nombre,
       destino_nombre: destino.nombre,
       monto,
-      comision_pct: cp,
+      comision_pct: cobraComision ? cp : 0,
       comision,
       nota: f.nota.value.trim() || null,
     };
