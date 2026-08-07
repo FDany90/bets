@@ -2411,12 +2411,11 @@ async function borrarTransferencia(id, dlg, reabrir) {
 // ============================================================
 //   VISTA: CONFIGURACIÓN (casas y cajeras)
 // ============================================================
-// Opciones de casino para una cajera (prioriza casas con cajeras)
+// Opciones de casino para una cajera: todos los casinos (para poder asignar
+// cualquiera, tenga o no marcado "tiene cajeras").
 function opcionesCasaCajera(selId) {
-  const conCajeras = state.casas.filter((x) => x.tiene_cajeras);
-  const lista = conCajeras.length ? conCajeras : state.casas;
   return `<option value="">— casino —</option>` +
-    lista.map((x) => `<option value="${x.id}" ${x.id === selId ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+    state.casas.map((x) => `<option value="${x.id}" ${x.id === selId ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
 }
 
 // Opciones de admin (dueño) para asignar a una cajera/cuenta.
