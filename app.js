@@ -255,6 +255,35 @@ function bonoPartido(p) {
   return p && p.bono_apuestas != null ? num(p.bono_apuestas) : bonoEstimadoPartido(p);
 }
 
+// Base sobre la que se calcula el bono de depósito: Σ monto apostado en líneas
+// de casas que dan bono (ej. Vira). El bono editable es un % de esta base.
+function baseBonoPartido(p) {
+  return apuestasDePartido(p.id).reduce((s, a) => s + (a.lineas || []).reduce((t, l) => {
+    const casa = state.casas.find((x) => x.nombre === l.casa);
+    return t + (casa && num(casa.bono_pct) > 0 ? num(l.monto_cargado) : 0);
+  }, 0), 0);
+}
+
+// % de bono por defecto de un partido: el de la casa (con bono) que aporta más
+// monto entre sus líneas. 0 si ninguna casa da bono.
+function bonoPctPartido(p) {
+  const porPct = {};
+  apuestasDePartido(p.id).forEach((a) => (a.lineas || []).forEach((l) => {
+    const casa = state.casas.find((x) => x.nombre === l.casa);
+    const bp = casa ? num(casa.bono_pct) : 0;
+    if (bp > 0) porPct[bp] = (porPct[bp] || 0) + num(l.monto_cargado);
+  }));
+  let mejor = 0, max = -1;
+  Object.entries(porPct).forEach(([bp, monto]) => { if (monto > max) { max = monto; mejor = num(bp); } });
+  return mejor;
+}
+
+// Bono de depósito a partir de un % (el bono va "adentro" del monto apostado):
+// base × pct/(100+pct). Ej: base 480.000 al 20% → 80.000.
+function bonoDesdePct(base, pct) {
+  return pct > 0 ? base * pct / (100 + pct) : 0;
+}
+
 // Cajeras distintas (objetos) que participan en las apuestas de un partido.
 function cajerasDePartido(p) {
   const nombres = [...new Set(apuestasDePartido(p.id).map((a) => a.cajera).filter(Boolean))];
@@ -1518,9 +1547,9 @@ function abrirResolverPartido(p) {
         </div>
         <p class="muted" style="margin:10px 0 0">Cada apuesta se resuelve sola según este resultado.</p>
         <div id="r-bono-wrap" style="margin-top:14px; display:none">
-          <label>Bono de depósito de este partido (se congela al guardar)</label>
-          <input type="number" step="any" name="bono_apuestas" />
-          <p class="muted" style="margin:6px 0 0;font-size:12px">Default = bono calculado con el % actual de la casa. Podés editarlo; queda guardado y no cambia aunque después edites el bono de la casa.</p>
+          <label>Bono de depósito — % (se congela al guardar)</label>
+          <input type="number" step="any" name="bono_pct" />
+          <p class="muted" id="r-bono-info" style="margin:6px 0 0;font-size:12px"></p>
         </div>
         <div id="r-preview" style="margin-top:14px"></div>
       </div>
@@ -1552,7 +1581,9 @@ function abrirResolverPartido(p) {
       </tr>`;
     }).join("");
     $("#r-bono-wrap", dlg).style.display = res ? "block" : "none";
-    const bonoEst = res ? num(f.bono_apuestas.value) : 0;
+    const bonoPct = num(f.bono_pct.value);
+    const bonoEst = res ? bonoDesdePct(baseBono, bonoPct) : 0;
+    $("#r-bono-info", dlg).innerHTML = `Se calcula como % del ingresado en casas con bono (Vira): <b>${money(baseBono)}</b> → bono <b>${money(bonoDesdePct(baseBono, bonoPct))}</b>. Se congela al guardar; editar el bono de la casa después no lo cambia.`;
     const bonoRet = res ? bonoRetiroPartido(p) : 0;
     const totalConBono = totalProfit + bonoEst + bonoRet;
     // Totales (solo cuando se eligió un resultado)
@@ -1568,10 +1599,15 @@ function abrirResolverPartido(p) {
       <tbody>${rows || `<tr><td colspan="5" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>${totales}`;
   };
 
-  // Default del bono de depósito: snapshot guardado si existe, si no el estimado en vivo.
-  f.bono_apuestas.value = Math.round(bonoPartido(p));
+  // Base y % por defecto del bono de depósito.
+  const baseBono = baseBonoPartido(p);
+  // Si ya está congelado, retro-calcula el % desde el monto guardado; si no, el % de la casa.
+  const pctDefault = (p.bono_apuestas != null && baseBono > num(p.bono_apuestas))
+    ? Math.round(num(p.bono_apuestas) * 100 / (baseBono - num(p.bono_apuestas)))
+    : bonoPctPartido(p);
+  f.bono_pct.value = pctDefault;
   f.resultado_ganador.addEventListener("change", preview);
-  f.bono_apuestas.addEventListener("input", preview);
+  f.bono_pct.addEventListener("input", preview);
   preview();
 
   f.addEventListener("submit", (e) => {
@@ -1586,7 +1622,7 @@ async function resolverPartido(dlg, id) {
   const p = state.partidosById[id];
   const res = f.resultado_ganador.value || null;
   const eraPendiente = !(p && p.resultado_ganador);
-  const bonoApuestas = num(f.bono_apuestas.value);
+  const bonoApuestas = bonoDesdePct(baseBonoPartido(p), num(f.bono_pct.value));
 
   const update = { resultado_ganador: res };
   let cajerasConsumidas = [];
