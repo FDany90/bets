@@ -19,7 +19,9 @@ const state = {
   tab: "partidos",
   casas: [],          // {id, nombre, bono_pct, tiene_cajeras, permite_gratis}
   casasById: {},      // id -> casa
-  cajeras: [],        // {id, nombre, casa_id}
+  admins: [],         // {id, nombre} — dueños de cajeros/cuentas (para agrupar/filtrar)
+  adminsById: {},     // id -> admin
+  cajeras: [],        // {id, nombre, casa_id, es_cuenta, admin_id}
   partidos: [],       // {id, nombre, fecha, hora, resultado_ganador}
   partidosById: {},   // id -> partido
   movimientos: [],    // {id, cajera_id, tipo, monto, bono_pct, nota, creado_en}
@@ -32,7 +34,11 @@ const state = {
   filtroEstado: "Pendiente",  // estado de partido ("" = todos | "Pendiente" | "Finalizado")
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
   cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
+  filtroAdmin: "",    // "" = todos · "none" = sin admin · <id> = ese admin
 };
+
+// Admin (dueño) de una cajera/cuenta, o null.
+const adminDeCajera = (c) => (c && c.admin_id ? state.adminsById[c.admin_id] : null);
 
 // % de comisión que cobran las cuentas por transferencia (global, configurable).
 const COMISION_CUENTA_DEFAULT = 5;
@@ -453,15 +459,19 @@ async function cargarTodo() {
     lineas: porApuesta[a.id] || [],
     _partido: state.partidosById[a.partido_id] || null,
   }));
-  // Config + transferencias: tolerante (si falta la migración, defaultea a vacío
-  // en vez de romper toda la carga).
-  const [cfg, transf] = await Promise.all([
+  // Config + transferencias + admins: tolerante (si falta la migración, defaultea
+  // a vacío en vez de romper toda la carga).
+  const [cfg, transf, admins] = await Promise.all([
     sb.from("config").select("*"),
     sb.from("transferencias").select("*").order("creado_en", { ascending: false }),
+    sb.from("admins").select("*").order("nombre"),
   ]);
   state.config = {};
   if (!cfg.error) cfg.data.forEach((r) => { state.config[r.clave] = r.valor; });
   state.transferencias = transf.error ? [] : transf.data;
+  state.admins = admins.error ? [] : admins.data;
+  state.adminsById = {};
+  state.admins.forEach((a) => { state.adminsById[a.id] = a; });
   congelarBonosResueltos();
   } finally {
     setBusy(false);
@@ -1627,8 +1637,11 @@ function viewCajeras() {
   if (!state.cajeras.length) {
     return `<div class="card"><p class="muted">No hay cajeras ni cuentas todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
   }
-  const cajeros = state.cajeras.filter((c) => !esCuenta(c));
-  const cuentas = state.cajeras.filter((c) => esCuenta(c));
+  // Filtro por admin (aplica a ambos sub-tabs).
+  const fAdmin = state.filtroAdmin;
+  const pasaAdmin = (c) => fAdmin === "" || (fAdmin === "none" ? !c.admin_id : c.admin_id === fAdmin);
+  const cajeros = state.cajeras.filter((c) => !esCuenta(c) && pasaAdmin(c));
+  const cuentas = state.cajeras.filter((c) => esCuenta(c) && pasaAdmin(c));
   const tab = state.cajerasTab === "cuenta" ? "cuenta" : "cajero";
 
   // Orden: actividad más reciente primero.
@@ -1637,6 +1650,15 @@ function viewCajeras() {
 
   const chips = [["cajero", "Cajeros", cajeros.length], ["cuenta", "Cuentas", cuentas.length]]
     .map(([v, t, n]) => `<button class="chip-f ${tab === v ? "active" : ""}" data-cajtab="${v}">${t} <span class="chip-n">${n}</span></button>`).join("");
+
+  const adminFiltro = state.admins.length ? `<div class="admin-filtro">
+      <label class="muted" style="margin:0">Admin</label>
+      <select id="filtro-admin">
+        <option value="" ${fAdmin === "" ? "selected" : ""}>Todos</option>
+        ${state.admins.map((a) => `<option value="${a.id}" ${fAdmin === a.id ? "selected" : ""}>${esc(a.nombre)}</option>`).join("")}
+        <option value="none" ${fAdmin === "none" ? "selected" : ""}>Sin admin</option>
+      </select>
+    </div>` : "";
 
   const cards = lista.length
     ? lista.map(tab === "cuenta" ? cardCuenta : cardCajero).join("")
@@ -1671,7 +1693,7 @@ function viewCajeras() {
         ${tab === "cuenta" ? "" : `<div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>`}
       </div>
     </div>
-    <div class="chips-filtro">${chips}</div>
+    <div class="chips-filtro">${chips}${adminFiltro}</div>
     ${toolbar}${cards}`;
 }
 
@@ -1684,10 +1706,11 @@ function cardCajero(c) {
   const conRetiro = !!c.saldo_retiro;
   const conPendiente = !!c.pendiente_retiro;
   const er = estadoRetiroCajera(c);
+  const admin = adminDeCajera(c);
   return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""}">
       <div class="cajera-head">
         <div class="cajera-title">
-          <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}</h2>
+          <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}${admin ? ` <span class="muted" style="font-size:13px;font-weight:400">· admin ${esc(admin.nombre)}</span>` : ""}</h2>
           <div class="retiro-toggles">
             <label class="retiro-toggle ${conRetiro ? "on" : ""}" title="Marcar cuando la cajera ya tiene saldo cargado para retirar">
               <input type="checkbox" data-retiro-toggle="${c.id}" ${conRetiro ? "checked" : ""} />
@@ -1731,10 +1754,11 @@ function cardCajero(c) {
 // Card de una cuenta (persona): saldo administrado + neto recibido/enviado. No apuesta.
 function cardCuenta(c) {
   const r = resumenCajera(c);
+  const admin = adminDeCajera(c);
   return `<div class="card cajera cuenta">
       <div class="cajera-head">
         <div class="cajera-title">
-          <h2 style="margin:0">${esc(c.nombre)} <span class="muted" style="font-size:13px;font-weight:400">· 👤 Cuenta</span></h2>
+          <h2 style="margin:0">${esc(c.nombre)} <span class="muted" style="font-size:13px;font-weight:400">· 👤 Cuenta${admin ? ` · admin ${esc(admin.nombre)}` : ""}</span></h2>
         </div>
         <div class="acc-right">
           <button class="btn-primary btn-sm" data-transf="${c.id}">🔁 Transferir</button>
@@ -1755,6 +1779,7 @@ function cardCuenta(c) {
 function bindCajeras() {
   const byId = (id) => state.cajeras.find((c) => c.id === id);
   $$("[data-cajtab]").forEach((b) => b.addEventListener("click", () => { state.cajerasTab = b.dataset.cajtab; render(); }));
+  $("#filtro-admin")?.addEventListener("change", (e) => { state.filtroAdmin = e.target.value; render(); });
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
@@ -2320,6 +2345,12 @@ function opcionesCasaCajera(selId) {
     lista.map((x) => `<option value="${x.id}" ${x.id === selId ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
 }
 
+// Opciones de admin (dueño) para asignar a una cajera/cuenta.
+function opcionesAdmin(selId) {
+  return `<option value="">— sin admin —</option>` +
+    state.admins.map((a) => `<option value="${a.id}" ${a.id === selId ? "selected" : ""}>${esc(a.nombre)}</option>`).join("");
+}
+
 function viewConfig() {
   const casas = state.casas.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
@@ -2329,7 +2360,12 @@ function viewConfig() {
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}${esCuenta(c) ? ` <span class="muted">· 👤 cuenta</span>` : ""}</span>
     ${esCuenta(c) ? `<span class="muted">sin casino</span>` : `<select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>`}
+    <select data-admin-cajera="${c.id}" title="Admin">${opcionesAdmin(c.admin_id)}</select>
     <button class="btn-danger btn-sm" data-del-cajera="${c.id}" title="Borrar">✕</button>
+  </div>`).join("");
+  const admins = state.admins.map((a) => `<div class="cajera-cfg">
+    <span class="cajera-cfg-nombre">${esc(a.nombre)}</span>
+    <button class="btn-danger btn-sm" data-del-admin="${a.id}" title="Borrar">✕</button>
   </div>`).join("");
 
   return `
@@ -2360,6 +2396,15 @@ function viewConfig() {
         <button class="btn-primary" id="add-cajera">Agregar</button>
       </div>
       <p class="muted" style="margin:8px 0 0">Una <b>cuenta</b> es una persona a la que le transferís plata (no se apuesta con ella, no se asocia a casino).</p>
+    </div>
+    <div class="card">
+      <h2>Admins</h2>
+      <div style="margin-bottom:14px">${admins || `<span class="muted">Sin admins</span>`}</div>
+      <div class="row">
+        <div class="field"><label>Nombre</label><input id="admin-nombre" placeholder="Ej. Daniel" /></div>
+        <button class="btn-primary" id="add-admin">Agregar admin</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Un <b>admin</b> es el dueño de ciertos cajeros/cuentas. Asignalos en la lista de arriba y filtralos en el panel de Cajeras.</p>
     </div>
     <div class="card">
       <h2>Ajustes</h2>
@@ -2402,6 +2447,23 @@ function bindConfig() {
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   });
+  $("#add-admin")?.addEventListener("click", async () => {
+    const nombre = $("#admin-nombre").value.trim();
+    if (!nombre) return;
+    const { error } = await sb.from("admins").insert({ nombre });
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  });
+  $$("[data-admin-cajera]").forEach((sel) => sel.addEventListener("change", async () => {
+    const { error } = await sb.from("cajeras").update({ admin_id: sel.value || null }).eq("id", sel.dataset.adminCajera);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  }));
+  $$("[data-del-admin]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("¿Borrar admin? Los cajeros/cuentas quedan sin admin.")) return;
+    await sb.from("admins").delete().eq("id", b.dataset.delAdmin);
+    await cargarTodo(); render();
+  }));
   $$("[data-casa-cajera]").forEach((sel) => sel.addEventListener("change", async () => {
     const { error } = await sb.from("cajeras").update({ casa_id: sel.value || null }).eq("id", sel.dataset.casaCajera);
     if (error) { alert("Error: " + error.message); return; }

@@ -35,6 +35,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-partido-bono-retiro.sql` | Migración que agregó `partidos.bono_retiro` (snapshot del bono por saldo de retiro al resolver) |
 | `migracion-partido-bono-apuestas.sql` | Migración que agregó `partidos.bono_apuestas` (snapshot editable del bono de depósito al resolver; congela el histórico) |
 | `migracion-cuentas-transferencias.sql` | Migración que agregó `cajeras.es_cuenta` + tablas `config` (ajustes globales) y `transferencias` (cajero↔cuenta con comisión) |
+| `migracion-admins.sql` | Migración que agregó la tabla `admins` (dueños) + `cajeras.admin_id` (agrupar/filtrar cajeros y cuentas por admin) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -48,8 +49,11 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - `id` uuid · `nombre` text único · `bono_pct` numeric (**bono de depósito por casa**, ej. Vira=20, SuperPro=10; se aplica al cargar dinero, NO en las apuestas) · `tiene_cajeras` boolean (sus líneas descuentan/acreditan el saldo de la cajera, ej. Vira=true) · `permite_gratis` boolean (da "apuesta gratis", ej. Betano=true) · `creado_en`
 
 **`cajeras`** — catálogo de cajeras + billetera (saldo). Incluye también las **cuentas** (personas).
-- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `es_cuenta` boolean (**true = cuenta**: persona a la que se le transfiere plata; NO es un cajero para apostar, no se asocia a casino ni aparece en las apuestas; se muestra en una sub-tab aparte) · `saldo_retiro` boolean (**flag manual**: la cajera ya tiene saldo cargado para poder retirar; resalta la card en verde) · `pendiente_retiro` boolean (**flag manual** independiente: bloqueo visual, tiene saldo a la espera de retirar y no se debe tocar; resalta la card y el monto en **rojo**, gana sobre el verde; solo visual) · `creado_en`
+- `id` uuid · `nombre` text único · `casa_id` uuid (FK → casas; el casino al que pertenece, define el bono al depositar) · `es_cuenta` boolean (**true = cuenta**: persona a la que se le transfiere plata; NO es un cajero para apostar, no se asocia a casino ni aparece en las apuestas; se muestra en una sub-tab aparte) · `admin_id` uuid (FK → admins, on delete set null; **dueño** del cajero/cuenta, para agrupar/filtrar; null = sin admin) · `saldo_retiro` boolean (**flag manual**: la cajera ya tiene saldo cargado para poder retirar; resalta la card en verde) · `pendiente_retiro` boolean (**flag manual** independiente: bloqueo visual, tiene saldo a la espera de retirar y no se debe tocar; resalta la card y el monto en **rojo**, gana sobre el verde; solo visual) · `creado_en`
 - El **saldo no se guarda**: se calcula en vivo (ver tabla `movimientos`, `transferencias` y sección 5).
+
+**`admins`** — dueños de cajeros/cuentas (para agrupar y filtrar)
+- `id` uuid · `nombre` text único · `creado_en`. Se asocian vía `cajeras.admin_id`.
 
 **`config`** — ajustes globales clave/valor
 - `clave` text (PK) · `valor` text. Hoy guarda `comision_cuenta_pct` (% de comisión de las cuentas, default 5).
@@ -132,13 +136,13 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
 
 **Cuentas (personas) y transferencias** — Las **cuentas** (`cajeras.es_cuenta = true`) son personas a las que se les transfiere plata; se administran igual que los cajeros (saldo/movimientos) pero **no apuestan** (no aparecen en apuestas ni en los modales Cargar/Retirar/Ganancia). Una **transferencia** cajero↔cuenta mueve saldo con **comisión** (global, `config.comision_cuenta_pct`, 5% default): el origen baja `monto`, el destino recibe `monto − comisión`, y la comisión es un **gasto que baja el profit histórico y actual**. Tiene su **historial propio** (`transferencias`, botón 🔁 Transferencias en Cajeras y en Reportes). Con filtro de cajera en Reportes la comisión se omite (gasto no atribuible a una cajera).
 
-**Tab Cajeras** — **sub-tabs (chips)** *Cajeros* / *Cuentas*. Card de resumen arriba (Saldo total del tab; en Cajeros además Total apostado). Botón **🔁 Transferir** (elige sentido cajero↔cuenta, monto; preview de comisión y neto) en ambos tabs. Las **cuentas** muestran una card simple (saldo + recibido neto + enviado + botones Transferir/Movimientos, sin toggles de apuesta). Una tarjeta por cajera con:
+**Tab Cajeras** — **sub-tabs (chips)** *Cajeros* / *Cuentas* + **filtro por Admin** (Todos / cada admin / Sin admin; aplica a ambos sub-tabs y a los totales). El admin del cajero/cuenta se muestra en la card. Card de resumen arriba (Saldo total del tab; en Cajeros además Total apostado). Botón **🔁 Transferir** (elige sentido cajero↔cuenta, monto; preview de comisión y neto) en ambos tabs. Las **cuentas** muestran una card simple (saldo + recibido neto + enviado + botones Transferir/Movimientos, sin toggles de apuesta). Una tarjeta por cajera con:
   - **Saldo disponible** (piso en 0) + **badge de disponibilidad de retiro** (se puede retirar cada **24 h** desde el último retiro: verde **"✅ Retiro disponible"** si pasaron 24 h o nunca retiró, ámbar **"⏳ Retiro disponible en 3 h 20 m"** con cuenta regresiva si falta) + **Apostado (pendiente)** + lista de **Partidos pendientes** con su monto. (Se quitaron los totales históricos cargado/ganado/retirado.) Ordenadas por **última actividad**.
   - **Toggle "Saldo de retiro"** (flag manual): al prenderlo la card se **resalta en verde** (borde + badge). Indica que la cajera ya tiene saldo cargado para retirar; se consume al resolver un partido.
   - **Toggle "🔒 Pendiente de retiro"** (flag manual independiente): al prenderlo la card **y el monto del saldo** se resaltan en **rojo** (bloqueo visual; gana sobre el verde si ambos están activos). Indica que tiene un saldo a la espera de ser retirado y que no se debe tocar hasta hacer el retiro. Solo visual, no afecta cálculos. **Se activa automáticamente** en todas las cajeras de un partido al **resolverlo por primera vez**; se apaga a mano (al hacer el retiro real). Optimista.
   - Botones **💵 Cargar** (casino sale de la cajera, bono auto-completado), **🏧 Retirar**, **💰 Ganancia** (suma al profit, no mueve saldo), **📜 Movimientos** (historial con **fecha y hora** de cada movimiento; cargas/retiros borrables).
 
-**Tab Configuración** — alta/baja de **casas** (tiene cajeras / da apuesta gratis + **Bono % editable**) y **cajeras/cuentas** (nombre + **casino asociado**, o checkbox **👤 Es cuenta** que la crea sin casino y fuera de las apuestas). Card **Ajustes**: **Comisión de cuentas (%)** global editable (`config.comision_cuenta_pct`).
+**Tab Configuración** — alta/baja de **casas** (tiene cajeras / da apuesta gratis + **Bono % editable**), **cajeras/cuentas** (nombre + **casino asociado** + **admin asignado**, o checkbox **👤 Es cuenta** que la crea sin casino y fuera de las apuestas) y **admins** (alta/baja). Card **Ajustes**: **Comisión de cuentas (%)** global editable (`config.comision_cuenta_pct`).
 
 ## 7. Setup desde cero (si hiciera falta)
 1. Crear proyecto en supabase.com → SQL Editor → correr `supabase-schema.sql`.
@@ -154,6 +158,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
    9. `migracion-cajera-pendiente-retiro.sql` — `cajeras.pendiente_retiro`.
    10. `migracion-partido-bono-apuestas.sql` — `partidos.bono_apuestas`.
    11. `migracion-cuentas-transferencias.sql` — `cajeras.es_cuenta` + tablas `config` y `transferencias`.
+   12. `migracion-admins.sql` — tabla `admins` + `cajeras.admin_id`.
    - `reset-datos.sql` (opcional): borra partidos/apuestas/líneas/movimientos, mantiene casas/cajeras.
 3. Settings → API → copiar URL + publishable/anon key en `config.js`.
 4. Abrir `index.html` (o deployar). En Configuración: setear Bono % de cada casa, marcar "tiene cajeras", y asociar cada cajera a su casino.
