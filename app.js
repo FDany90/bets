@@ -1169,7 +1169,7 @@ function abrirModal(apuesta, partidoId) {
 }
 
 function selectCajera(sel) {
-  const opts = state.cajeras.filter((c) => !esCuenta(c)).map((c) => `<option ${c.nombre === sel ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+  const opts = state.cajeras.filter((c) => !esCuenta(c)).map((c) => `<option value="${esc(c.nombre)}" ${c.nombre === sel ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
   return `<select name="cajera"><option value="">— elegir —</option>${opts}</select>`;
 }
 
@@ -1217,7 +1217,7 @@ function renderLineasNueva(dlg) {
   const cont = $("#lineas", dlg);
   cont.innerHTML = modalLineas.map((l, i) => {
     const c = calcLinea(l);
-    const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x)).map((x) => `<option ${x.nombre === l.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+    const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x)).map((x) => `<option value="${esc(x.nombre)}" ${x.nombre === l.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const casaOpts = state.casas.map((x) => `<option ${x.nombre === l.casa ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const gratisField = casaPermiteGratis(l.casa)
       ? `<div><label>🎁 Apuesta gratis</label><input type="number" step="any" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
