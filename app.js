@@ -771,7 +771,7 @@ function renderReporteResultados() {
     <div class="toolbar" style="margin-bottom:14px">
       <button class="btn-ghost btn-sm" id="retirar-ganancia">💸 Retirar ganancia</button>
       <button class="btn-ghost btn-sm" id="ver-retiros">📜 Retiros (${state.retirosGanancia.length})</button>
-      <button class="btn-ghost btn-sm" id="ver-transferencias">🔁 Transferencias (${state.transferencias.length})</button>
+      <button class="btn-ghost btn-sm" id="ver-transferencias">🔁 Transferencias a cuentas (${state.transferencias.filter((t) => { const c = state.cajeras.find((x) => x.id === t.destino_id); return c ? esCuenta(c) : num(t.comision) > 0; }).length})</button>
       <button class="btn-ghost btn-sm" id="ver-propinas">💵 Propinas</button>
     </div>
     <div class="kpis">
@@ -2456,35 +2456,42 @@ function guardarTransferencia(payload) {
   return true;
 }
 
-// Historial de transferencias (con su comisión). Separado del de retiros.
+// Historial de transferencias HACIA cuentas (cajero → cuenta), que son las que
+// cobran comisión. Separado del de retiros.
 function abrirTransferencias() {
-  const rows = state.transferencias.map((t) => {
+  // Solo transferencias cuyo destino es una cuenta (las que cobran comisión).
+  const destinoEsCuenta = (t) => {
+    const c = state.cajeras.find((x) => x.id === t.destino_id);
+    return c ? esCuenta(c) : num(t.comision) > 0; // fallback si la cuenta fue borrada
+  };
+  const lista = state.transferencias.filter(destinoEsCuenta);
+  const rows = lista.map((t) => {
     const fh = fmtFechaHoraPartes(t.creado_en);
     return `<tr>
       <td><div>${esc(fh.fecha)}</div>${fh.hora ? `<div class="muted" style="font-size:12px">${esc(fh.hora)} hs</div>` : ""}</td>
       <td>${esc(t.origen_nombre || "—")} → ${esc(t.destino_nombre || "—")}${t.nota ? ` <span class="muted">· ${esc(t.nota)}</span>` : ""}</td>
       <td class="num">${money(num(t.monto))}</td>
       <td class="num neg">${num(t.comision) > 0 ? `−${money(num(t.comision))}` : "—"}</td>
-      <td class="num pos">${num(t.bono_destino) > 0 ? `+${money(num(t.bono_destino))}` : "—"}</td>
-      <td class="num pos">${money(num(t.monto) - num(t.comision) + num(t.bono_destino))}</td>
+      <td class="num pos">${money(num(t.monto) - num(t.comision))}</td>
       <td><button type="button" class="btn-danger btn-sm" data-del-transf="${t.id}" title="Borrar">🗑️</button></td>
     </tr>`;
   }).join("");
-  const totalComision = state.transferencias.reduce((s, t) => s + num(t.comision), 0);
+  const totalComision = lista.reduce((s, t) => s + num(t.comision), 0);
+  const totalMonto = lista.reduce((s, t) => s + num(t.monto), 0);
 
   const dlg = document.createElement("dialog");
   dlg.innerHTML = `
     <form method="dialog" id="form-transf-hist">
       <div class="modal-head">
-        <h2 style="margin:0">🔁 Transferencias</h2>
+        <h2 style="margin:0">🔁 Transferencias a cuentas</h2>
         <button type="button" class="btn-ghost btn-sm" id="th-cerrar">✕</button>
       </div>
       <div class="modal-body">
         <div class="tbl-wrap"><table>
-          <thead><tr><th>Fecha</th><th>De → A</th><th class="num">Monto</th><th class="num">Comisión</th><th class="num">Bono</th><th class="num">Neto</th><th></th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="7" class="muted">Sin transferencias.</td></tr>`}</tbody>
+          <thead><tr><th>Fecha</th><th>De → A</th><th class="num">Monto</th><th class="num">Comisión</th><th class="num">Neto</th><th></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="muted">Sin transferencias a cuentas.</td></tr>`}</tbody>
         </table></div>
-        <p class="muted" style="margin:10px 0 0">Comisión total (todas): <b class="neg">−${money(totalComision)}</b>. Se descuenta del profit. Borrar una revierte el saldo y la comisión.</p>
+        <p class="muted" style="margin:10px 0 0">Solo transferencias <b>cajero → cuenta</b> (las que cobran comisión). Transferido: <b>${money(totalMonto)}</b> · Comisión total: <b class="neg">−${money(totalComision)}</b> (se descuenta del profit). Borrar una revierte el saldo y la comisión.</p>
       </div>
       <div class="modal-foot">
         <button type="submit" class="btn-primary">Cerrar</button>
