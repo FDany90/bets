@@ -260,7 +260,7 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 
 /* Acciones de la fila: eliminar/editar a la izquierda, resolver/detalle a la derecha */
 .acciones { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
-.acc-left, .acc-right { display: flex; gap: 6px; }
+.acc-left, .acc-right { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* Potencial por casa (apuestas pendientes): premio / profit / % */
 .pot-list { display: flex; flex-direction: column; gap: 3px; align-items: stretch; min-width: 120px; }
