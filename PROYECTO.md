@@ -75,7 +75,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
-- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%_de_la_última_carga/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (**LEGACY, ya no se usa**: era el snapshot del bono por partido; reemplazado por `apuestas.bono_pct` (bono por apuesta)) · `creado_en`
+- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%_de_la_última_carga/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (snapshot legacy del bono por partido; ya no se escribe, pero se usó **una vez** para restaurar `apuestas.bono_pct` sin perder el profit histórico —ver `migrarBonoApuestas`, flag `config.bono_apuestas_migrado`) · `creado_en`
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)

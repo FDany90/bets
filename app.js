@@ -523,24 +523,44 @@ async function cargarTodo() {
   state.adminsById = {};
   state.admins.forEach((a) => { state.adminsById[a.id] = a; });
   state.bonos = bonos.error ? [] : bonos.data;
-  backfillBonoApuestas();
+  await migrarBonoApuestas();
   } finally {
     setBusy(false);
   }
 }
 
-// Backfill: las apuestas viejas (sin bono elegido, bono_pct == null) se completan
-// con el bono heredado de su casa, para preservar el profit histórico al pasar al
-// modelo de bono por apuesta. Escribe en memoria + persiste en segundo plano.
-function backfillBonoApuestas() {
+// Migración one-time del bono por apuesta (guardada con flag en config):
+// - Partidos ya resueltos con snapshot guardado (partidos.bono_apuestas): se
+//   reparte ese total entre sus apuestas resolviendo bono_pct para que
+//   Σ (ingresado × %/(100+%)) == snapshot → RESTAURA el profit histórico exacto.
+// - Apuestas sin bono elegido (bono_pct == null) fuera de esos partidos: bono de la casa.
+// - Apuestas que ya tienen un bono elegido: no se tocan.
+async function migrarBonoApuestas() {
   if (!sb) return;
-  const pend = state.apuestas.filter((a) => a.bono_pct == null);
-  pend.forEach((a) => {
-    const v = casaBonoPctApuesta(a);
-    a.bono_pct = v; // completa en memoria (no cambia el número mostrado)
-    sb.from("apuestas").update({ bono_pct: v }).eq("id", a.id)
-      .then((r) => { if (r && r.error) a.bono_pct = null; }); // revierte si falla (ej. falta migración)
+  if (state.config.bono_apuestas_migrado === "1") return; // ya corregido
+  // % por partido que reproduce el snapshot congelado.
+  const pctPorPartido = {};
+  state.partidos.forEach((p) => {
+    if (!p.resultado_ganador || p.bono_apuestas == null) return;
+    const S = num(p.bono_apuestas);
+    if (!(S > 0)) return;
+    const base = apuestasDePartido(p.id).reduce((s, a) => s + calcApuesta(a).ingresado, 0);
+    if (base > S) pctPorPartido[p.id] = S * 100 / (base - S);
   });
+  const updates = [];
+  state.apuestas.forEach((a) => {
+    let nuevo;
+    if (a.partido_id in pctPorPartido) nuevo = pctPorPartido[a.partido_id];
+    else if (a.bono_pct == null) nuevo = casaBonoPctApuesta(a);
+    else return; // ya tiene bono elegido → no tocar
+    if (num(a.bono_pct) !== nuevo) { a.bono_pct = nuevo; updates.push({ id: a.id, v: nuevo }); }
+  });
+  const res = await Promise.all(updates.map((u) => sb.from("apuestas").update({ bono_pct: u.v }).eq("id", u.id)));
+  // Si algún update falló (ej. falta la columna/migración), no marcamos como hecho.
+  if (res.every((r) => !r || !r.error)) {
+    await sb.from("config").upsert({ clave: "bono_apuestas_migrado", valor: "1" });
+    state.config.bono_apuestas_migrado = "1";
+  }
 }
 
 function mostrarError(msg) {
