@@ -353,6 +353,19 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .cajera-saldo .value { font-size: 31px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .cajera-saldo .value.pos { text-shadow: 0 0 24px var(--accent-glow); }
 .cajera-saldo .value.bloqueado { color: var(--danger); text-shadow: 0 0 24px rgba(248, 81, 73, 0.35); }
+/* Chips para elegir un bono del listado (uno activo) */
+.linea-bono { grid-column: 1 / -1; }
+.linea-bono label { display: block; margin-bottom: 4px; }
+.bono-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bono-chip {
+  font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); background: var(--bg-input);
+  cursor: pointer; white-space: nowrap; width: auto;
+}
+.bono-chip.on {
+  color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.45);
+  background: linear-gradient(160deg, rgba(46, 160, 67, 0.18), rgba(46, 160, 67, 0.05));
+}
 /* Filtro por admin en el panel de Cajeras (al lado de los chips) */
 .admin-filtro { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .admin-filtro select { width: auto; min-width: 130px; }
