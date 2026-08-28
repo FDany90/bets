@@ -75,7 +75,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
-- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on de `saldo × bono%_de_la_última_carga/100`; suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (snapshot legacy del bono por partido; ya no se escribe, pero se usó **una vez** para restaurar `apuestas.bono_pct` sin perder el profit histórico —ver `migrarBonoApuestas`, flag `config.bono_apuestas_migrado`) · `creado_en`
+- `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on del **monto de bono de su última carga** (`carga.monto × bono%/100`); suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (snapshot legacy del bono por partido; ya no se escribe, pero se usó **una vez** para restaurar `apuestas.bono_pct` sin perder el profit histórico —ver `migrarBonoApuestas`, flag `config.bono_apuestas_migrado`) · `creado_en`
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)
@@ -119,7 +119,7 @@ El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). S
 
 ### Bono por "saldo de retiro" (al resolver un partido)
 Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le cargó el saldo necesario para **retirar** ganancias. Al **resolver un partido por primera vez**:
-- Por cada **cajera distinta** de las apuestas del partido con `saldo_retiro` on: bono `= saldo_actual × bono%_de_la_última_carga / 100` (saldos del momento, antes de aplicar el resultado). El `bono%` sale del `bono_pct` de la **Carga más reciente** de ese cajero (o de la transferencia entrante más reciente, si es posterior).
+- Por cada **cajera distinta** de las apuestas del partido con `saldo_retiro` on: el **monto de bono de su última carga** = `carga.monto × carga.bono_pct/100` (ej. carga 400.000 al 20% → 80.000). Usa la **Carga más reciente** (o el `bono_destino` de la transferencia entrante más reciente, si es posterior). El total es la suma; el popup Resolver muestra el desglose por cajera.
 - La suma se guarda como **snapshot** en `partidos.bono_retiro` (no se recalcula después) y **suma al profit** (card del partido y Reportes).
 - Se **apaga `saldo_retiro`** de esas cajeras → si la misma cajera está en otro partido sin resolver, **no se cuenta de nuevo** (se cuenta una sola vez). Volver el partido a Pendiente pone `bono_retiro = 0` (no reactiva el flag automáticamente).
 

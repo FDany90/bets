@@ -295,31 +295,32 @@ function cajerasConRetiroDePartido(p) {
   return cajerasDePartido(p).filter((c) => c.saldo_retiro);
 }
 
-// Bono por "saldo de retiro" al resolver: por cada cajera distinta del partido
-// con el flag saldo_retiro activado, (saldo actual) × (bono% de la última carga) / 100.
-// Se evalúa con los saldos del momento (al resolver se guarda como snapshot).
+// Bono por "saldo de retiro" al resolver: por cada cajera distinta del partido con
+// el flag saldo_retiro activado, el MONTO de bono de su última carga. Total = suma.
+// Se guarda como snapshot al resolver.
 function bonoRetiroPartido(p) {
-  return cajerasConRetiroDePartido(p).reduce((s, c) => {
-    const bp = ultimoBonoCargaCajera(c);
-    return s + resumenCajera(c).saldo * bp / 100;
-  }, 0);
+  return bonosRetiroDePartido(p).reduce((s, x) => s + x.bono, 0);
+}
+// Desglose del bono de retiro: [{ nombre, bono }] por cada cajera con saldo_retiro.
+function bonosRetiroDePartido(p) {
+  return cajerasConRetiroDePartido(p).map((c) => ({ nombre: c.nombre, bono: bonoUltimaCargaCajera(c) }));
 }
 
-// % de bono de la ÚLTIMA carga del cajero: el `bono_pct` de la Carga más reciente
-// (o el `bono_pct_destino` de la transferencia entrante más reciente, si es posterior).
-// 0 si nunca recibió una carga/transferencia con bono.
-function ultimoBonoCargaCajera(c) {
+// MONTO de bono de la ÚLTIMA carga del cajero: monto × bono_pct/100 de la Carga más
+// reciente (o el bono_destino de la transferencia entrante más reciente, si es posterior).
+// Ej: carga 400.000 al 20% → bono 80.000. 0 si nunca recibió carga/transferencia con bono.
+function bonoUltimaCargaCajera(c) {
   let max = -1, bono = 0;
   state.movimientos.forEach((m) => {
     if (m.cajera_id === c.id && m.tipo === "Carga" && m.creado_en) {
       const t = Date.parse(m.creado_en);
-      if (!isNaN(t) && t > max) { max = t; bono = num(m.bono_pct); }
+      if (!isNaN(t) && t > max) { max = t; bono = num(m.monto) * num(m.bono_pct) / 100; }
     }
   });
   state.transferencias.forEach((tr) => {
     if (tr.destino_id === c.id && tr.creado_en) {
       const t = Date.parse(tr.creado_en);
-      if (!isNaN(t) && t > max) { max = t; bono = num(tr.bono_pct_destino); }
+      if (!isNaN(t) && t > max) { max = t; bono = num(tr.bono_destino); }
     }
   });
   return bono;
@@ -1687,16 +1688,20 @@ function abrirResolverPartido(p) {
     }).join("");
     // Bono: suma del bono elegido en cada apuesta (no depende del resultado).
     const bonoEst = res ? bonoEstimadoPartido(p) : 0;
-    const bonoRet = res ? bonoRetiroPartido(p) : 0;
+    const bonosRet = res ? bonosRetiroDePartido(p) : [];
+    const bonoRet = bonosRet.reduce((s, x) => s + x.bono, 0);
     const totalConBono = totalProfit + bonoEst + bonoRet;
+    // Detalle del bono de retiro por cajera (monto de bono de su última carga)
+    const bonoRetDetalle = bonosRet.filter((x) => x.bono > 0).map((x) =>
+      `<div class="rt-row" style="font-size:12px;padding-left:12px"><span class="muted">· ${esc(x.nombre)}</span><b class="pos">+${money(x.bono)}</b></div>`).join("");
     // Totales (solo cuando se eligió un resultado)
     const totales = res ? `
       <div class="resolver-totales">
         <div class="rt-row"><span>Profit total cajeras</span><b class="${totalProfit >= 0 ? "pos" : "neg"}">${money(totalProfit)}</b></div>
         ${bonoEst > 0 ? `<div class="rt-row"><span>Bono de apuestas</span><b class="pos">+${money(bonoEst)}</b></div>` : ""}
-        ${bonoRet > 0 ? `<div class="rt-row"><span>Bono por saldo de retiro</span><b class="pos">+${money(bonoRet)}</b></div>` : ""}
+        ${bonoRet > 0 ? `<div class="rt-row"><span>Bono por saldo de retiro</span><b class="pos">+${money(bonoRet)}</b></div>${bonoRetDetalle}` : ""}
         <div class="rt-total"><span>Total</span><b class="${totalConBono >= 0 ? "pos" : "neg"}">${money(totalConBono)}</b></div>
-      </div>${bonoRet > 0 ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar se desactiva el “saldo de retiro” de esas cajeras (se cuenta una sola vez).</p>` : ""}${!p.resultado_ganador ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar, las cajeras de este partido quedan en <b style="color:var(--danger)">🔒 Pendiente de retiro</b> (rojas) hasta que hagas el retiro.</p>` : ""}` : "";
+      </div>${bonoRet > 0 ? `<p class="muted" style="margin:8px 0 0;font-size:12px">El bono de retiro es el bono de la última carga de cada cajera. Al guardar se desactiva el “saldo de retiro” de esas cajeras (se cuenta una sola vez).</p>` : ""}${!p.resultado_ganador ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Al guardar, las cajeras de este partido quedan en <b style="color:var(--danger)">🔒 Pendiente de retiro</b> (rojas) hasta que hagas el retiro.</p>` : ""}` : "";
     $("#r-preview", dlg).innerHTML = `<div class="tbl-wrap"><table>
       <thead><tr><th>Cajera</th><th>Estado</th><th class="num">Ingresado</th><th class="num">Bono</th><th class="num">Premio</th><th class="num">Profit</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="6" class="muted">Sin apuestas</td></tr>`}</tbody></table></div>${totales}`;
