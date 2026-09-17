@@ -260,8 +260,8 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 
 /* Cuota resaltada según su valor (más alta = más marcada) */
 .cuota { font-variant-numeric: tabular-nums; }
-.cuota-alta { font-weight: 800; color: #f5c518; }
-.cuota-xalta { font-weight: 800; color: #fb923c; text-shadow: 0 0 10px rgba(251, 146, 60, 0.45); }
+.cuota-alta { font-weight: 800; color: #a78bfa; }
+.cuota-xalta { font-weight: 800; color: #c084fc; text-shadow: 0 0 10px rgba(192, 132, 252, 0.5); }
 
 /* Admin de la apuesta: etiqueta de color + borde lateral en la fila */
 .admin-tag { font-size: 15px; font-weight: 800; white-space: nowrap; margin-left: 6px; }
