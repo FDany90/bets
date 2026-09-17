@@ -1842,12 +1842,11 @@ function viewCajeras() {
 
   const saldoTotal = lista.reduce((s, c) => s + resumenCajera(c).saldo, 0);
 
-  const btnOrden = `<button class="btn-ghost ${porSaldo ? "activo" : ""}" id="ordenar-cajeras" title="Ordenar por saldo disponible (mayor a menor)">↕️ ${porSaldo ? "Por saldo ↓" : "Por actividad"}</button>`;
+  const btnOrden = `<button class="btn-ghost btn-orden ${porSaldo ? "activo" : ""}" id="ordenar-cajeras" title="Ordenar por saldo disponible (mayor a menor)">↕️ ${porSaldo ? "Por saldo ↓" : "Por actividad"}</button>`;
   const toolbar = tab === "cuenta"
     ? `<div class="toolbar">
         <button class="btn-primary" id="transferir">🔁 Transferir</button>
         <button class="btn-ghost" id="ver-transf">📜 Transferencias</button>
-        ${btnOrden}
         <div class="spacer"></div>
         <span class="muted">Comisión ${comisionCuentaPct()}% · ${cuentas.length} cuenta(s)</span>
       </div>`
@@ -1856,7 +1855,6 @@ function viewCajeras() {
         <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
         <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
         <button class="btn-ghost" id="transferir">🔁 Transferir</button>
-        ${btnOrden}
         <div class="spacer"></div>
         <span class="muted">${cajeros.length} cajero(s)</span>
       </div>`;
@@ -1870,7 +1868,8 @@ function viewCajeras() {
         ${tab === "cuenta" ? "" : `<div class="kpi"><div class="label">Total apostado</div><div class="value">${money(apostadoTotal)}</div></div>`}
       </div>
     </div>
-    <div class="chips-filtro">${chips}${casaFiltro}${adminFiltro}</div>
+    <div class="cajeras-subtabs">${chips}</div>
+    <div class="cajeras-controles">${btnOrden}${casaFiltro}${adminFiltro}</div>
     ${toolbar}${cards}`;
 }
 
