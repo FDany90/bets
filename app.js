@@ -43,7 +43,7 @@ const state = {
 const adminDeCajera = (c) => (c && c.admin_id ? state.adminsById[c.admin_id] : null);
 // Color por admin (para distinguir apuestas). Se asigna por orden (los admins se
 // cargan alfabéticos): 0=púrpura, 1=azul, luego otros. Ej: Dani=púrpura, Nico=azul.
-const ADMIN_COLORS = ["#a78bfa", "#6cb0ff", "#34d399", "#e3b341", "#f472b6", "#fb923c", "#2dd4bf", "#f87171"];
+const ADMIN_COLORS = ["#f87171", "#6cb0ff", "#34d399", "#e3b341", "#f472b6", "#fb923c", "#2dd4bf", "#a78bfa"];
 const colorAdmin = (admin) => {
   if (!admin) return "";
   const i = state.admins.findIndex((a) => a.id === admin.id);
@@ -1041,7 +1041,7 @@ function filaApuesta(a) {
   // Saldo actual de la cajera (chico y gris), junto al nombre
   const cajObj = state.cajeras.find((x) => x.nombre === a.cajera);
   const saldoTxt = cajObj
-    ? ` <span class="saldo-inline">· Saldo actual: ${money(resumenCajera(cajObj).saldo)}</span>`
+    ? ` <span class="saldo-inline">· Saldo: ${money(resumenCajera(cajObj).saldo)}</span>`
     : "";
   // Cajera con "saldo de retiro" activado → nombre en verde (lista para retirar)
   const conRetiro = !!(cajObj && cajObj.saldo_retiro);
