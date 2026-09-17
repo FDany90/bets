@@ -1925,10 +1925,11 @@ function cardCajero(c) {
   const conPendiente = !!c.pendiente_retiro;
   const er = estadoRetiroCajera(c);
   const admin = adminDeCajera(c);
-  return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""}">
+  const adminCol = colorAdmin(admin);
+  return `<div class="card cajera ${conRetiro ? "con-retiro" : ""} ${conPendiente ? "pendiente-retiro" : ""} ${admin ? "con-admin" : ""}"${admin ? ` style="--admin-col:${adminCol}"` : ""}>
       <div class="cajera-head">
         <div class="cajera-title">
-          <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}${admin ? ` <span class="muted" style="font-size:13px;font-weight:400">· admin ${esc(admin.nombre)}</span>` : ""}${esActivo(c) ? "" : ` <span class="muted" style="font-size:13px;font-weight:400">· ✗ inactivo</span>`}</h2>
+          <h2 style="margin:0">${esc(c.nombre)}${casa ? ` <span class="muted" style="font-size:13px;font-weight:400">· ${esc(casa.nombre)}</span>` : ""}${admin ? ` <span class="admin-tag" style="color:${adminCol}">● ${esc(admin.nombre)}</span>` : ""}${esActivo(c) ? "" : ` <span class="muted" style="font-size:13px;font-weight:400">· ✗ inactivo</span>`}</h2>
           <div class="retiro-toggles">
             <label class="retiro-toggle ${conRetiro ? "on" : ""}" title="Marcar cuando la cajera ya tiene saldo cargado para retirar">
               <input type="checkbox" data-retiro-toggle="${c.id}" ${conRetiro ? "checked" : ""} />
@@ -1973,10 +1974,11 @@ function cardCajero(c) {
 function cardCuenta(c) {
   const r = resumenCajera(c);
   const admin = adminDeCajera(c);
-  return `<div class="card cajera cuenta">
+  const adminCol = colorAdmin(admin);
+  return `<div class="card cajera cuenta ${admin ? "con-admin" : ""}"${admin ? ` style="--admin-col:${adminCol}"` : ""}>
       <div class="cajera-head">
         <div class="cajera-title">
-          <h2 style="margin:0">${esc(c.nombre)} <span class="muted" style="font-size:13px;font-weight:400">· 👤 Cuenta${admin ? ` · admin ${esc(admin.nombre)}` : ""}</span></h2>
+          <h2 style="margin:0">${esc(c.nombre)} <span class="muted" style="font-size:13px;font-weight:400">· 👤 Cuenta</span>${admin ? ` <span class="admin-tag" style="color:${adminCol}">● ${esc(admin.nombre)}</span>` : ""}</h2>
         </div>
         <div class="acc-right">
           <button class="btn-primary btn-sm" data-transf="${c.id}">🔁 Transferir</button>
