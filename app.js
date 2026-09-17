@@ -66,7 +66,8 @@ const esActivo = (c) => !!c && c.activo !== false;
 
 // ---------- Helpers ----------
 const num = (v) => {
-  const n = parseFloat(v);
+  // Acepta coma o punto como separador decimal (teclado es-AR muestra coma).
+  const n = parseFloat(String(v ?? "").trim().replace(",", "."));
   return isNaN(n) ? 0 : n;
 };
 const money = (v) =>
@@ -715,8 +716,8 @@ function viewReportes() {
         <div class="field"><label>Desde</label><input type="date" id="f-desde" value="${esc(f.desde)}" ${cust ? "" : "disabled"} /></div>
         <div class="field"><label>Hasta</label><input type="date" id="f-hasta" value="${esc(f.hasta)}" ${cust ? "" : "disabled"} /></div>
         <div class="field"><label>Cajera</label><select id="f-cajera"><option value="">Todas</option>${optCajera}</select></div>
-        <div class="field"><label>Ingresado mín</label><input type="number" inputmode="decimal" step="any" id="f-min" value="${esc(f.montoMin)}" /></div>
-        <div class="field"><label>Ingresado máx</label><input type="number" inputmode="decimal" step="any" id="f-max" value="${esc(f.montoMax)}" /></div>
+        <div class="field"><label>Ingresado mín</label><input type="text" inputmode="decimal" id="f-min" value="${esc(f.montoMin)}" /></div>
+        <div class="field"><label>Ingresado máx</label><input type="text" inputmode="decimal" id="f-max" value="${esc(f.montoMax)}" /></div>
         <button class="btn-ghost" id="f-limpiar">Limpiar</button>
       </div>
     </div>
@@ -948,7 +949,7 @@ function abrirRetirarGanancia() {
       </div>
       <div class="modal-body">
         <p class="muted" style="margin:0 0 10px">Baja el <b>Profit total actual</b> (reparto). El histórico no cambia. El reparto entre ustedes es interno, no se guarda.</p>
-        <div><label>Monto a retirar</label><input type="number" inputmode="decimal" step="any" name="monto" placeholder="1000000" required autofocus /></div>
+        <div><label>Monto a retirar</label><input type="text" inputmode="decimal" name="monto" placeholder="1000000" required autofocus /></div>
         <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Reparto con socio" /></div>
       </div>
       <div class="modal-foot">
@@ -1298,7 +1299,7 @@ function abrirModal(apuesta, partidoId) {
       <div class="modal-body">
         <div class="grid grid-2">
           <div><label>Cajera</label>${selectCajera(a.cajera)}</div>
-          <div><label>Premio cobrado (override, opcional)</label><input type="number" inputmode="decimal" step="any" name="premio_cobrado" value="${a.premio_cobrado ?? ""}" placeholder="auto desde la cuota" /></div>
+          <div><label>Premio cobrado (override, opcional)</label><input type="text" inputmode="decimal" name="premio_cobrado" value="${a.premio_cobrado ?? ""}" placeholder="auto desde la cuota" /></div>
         </div>
         <div style="margin-top:12px"><label>Bono (para profit, no afecta lo apostado)</label><div id="edit-bono">${bonoChipsHtml(a.bono_pct)}</div></div>
 
@@ -1394,14 +1395,14 @@ function renderLineasNueva(dlg) {
     const cajeraOpts = state.cajeras.filter((x) => !esCuenta(x) && esActivo(x)).map((x) => `<option value="${esc(x.nombre)}" ${x.nombre === l.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const casaOpts = state.casas.map((x) => `<option ${x.nombre === l.casa ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const gratisField = casaPermiteGratis(l.casa)
-      ? `<div><label>🎁 Apuesta gratis</label><input type="number" inputmode="decimal" step="any" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
+      ? `<div><label>🎁 Apuesta gratis</label><input type="text" inputmode="decimal" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
       : "";
     return `<div class="linea" data-i="${i}">
       <div><label>Cajera</label><select data-f="cajera"><option value="">— elegir —</option>${cajeraOpts}</select></div>
       <div><label>Casa</label><select data-f="casa"><option value="">—</option>${casaOpts}</select></div>
-      <div><label>Cargado (real)</label><input type="number" inputmode="decimal" step="any" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
+      <div><label>Cargado (real)</label><input type="text" inputmode="decimal" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
       ${gratisField}
-      <div><label>Cuota</label><input type="number" inputmode="decimal" step="any" data-f="cuota" value="${l.cuota}" /></div>
+      <div><label>Cuota</label><input type="text" inputmode="decimal" data-f="cuota" value="${l.cuota}" /></div>
       <div><label>Resultado</label>${resultadoFieldHtml(l)}</div>
       <div class="linea-bono"><label>Bono (para profit, no afecta lo apostado)</label>${bonoChipsHtml(l.apuesta_bono_pct)}</div>
       <div class="calc"><span class="calc-txt">apostado<b>${money(c.apostado)}</b>premio ${money(c.premio)}${num(l.apuesta_bono_pct) > 0 ? ` · bono ${money(num(l.monto_cargado) * num(l.apuesta_bono_pct) / (100 + num(l.apuesta_bono_pct)))}` : ""}</span>
@@ -1505,13 +1506,13 @@ function renderLineas(dlg) {
     const c = calcLinea(l);
     const casaOpts = state.casas.map((x) => `<option ${x.nombre === l.casa ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
     const gratisField = casaPermiteGratis(l.casa)
-      ? `<div><label>🎁 Apuesta gratis</label><input type="number" inputmode="decimal" step="any" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
+      ? `<div><label>🎁 Apuesta gratis</label><input type="text" inputmode="decimal" data-f="apuesta_gratis" value="${l.apuesta_gratis ?? ""}" placeholder="0" /></div>`
       : "";
     return `<div class="linea" data-i="${i}">
       <div><label>Casa</label><select data-f="casa"><option value="">—</option>${casaOpts}</select></div>
-      <div><label>Cargado (real)</label><input type="number" inputmode="decimal" step="any" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
+      <div><label>Cargado (real)</label><input type="text" inputmode="decimal" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
       ${gratisField}
-      <div><label>Cuota</label><input type="number" inputmode="decimal" step="any" data-f="cuota" value="${l.cuota}" /></div>
+      <div><label>Cuota</label><input type="text" inputmode="decimal" data-f="cuota" value="${l.cuota}" /></div>
       <div><label>Resultado</label>${resultadoFieldHtml(l)}</div>
       <div class="calc"><span class="calc-txt">apostado<b>${money(c.apostado)}</b>premio ${money(c.premio)}</span>
         <button type="button" class="btn-danger btn-sm" data-rm="${i}" style="margin-top:4px">✕</button></div>
@@ -2069,8 +2070,8 @@ function abrirCargar(cajeraFija) {
           <div><label>Cajera</label>${seleccionable
             ? `<select name="cajera_id">${cajeraOpts}</select>`
             : `<input value="${esc(cajeraFija.nombre)}" disabled />`}</div>
-          <div><label>Monto a cargar</label><input type="number" inputmode="decimal" step="any" name="monto" placeholder="100000" required autofocus /></div>
-          <div><label>Bono %</label><input type="number" inputmode="decimal" step="any" name="bono" /></div>
+          <div><label>Monto a cargar</label><input type="text" inputmode="decimal" name="monto" placeholder="100000" required autofocus /></div>
+          <div><label>Bono %</label><input type="text" inputmode="decimal" name="bono" /></div>
           <label style="display:flex;align-items:flex-end;gap:6px;color:var(--text);cursor:pointer;padding-bottom:8px">
             <input type="checkbox" name="con_bono" checked style="width:auto" /> Cargar con bono
           </label>
@@ -2158,8 +2159,8 @@ function abrirRetirar(cajeraFija) {
           <div><label>Cajera</label>${seleccionable
             ? `<select name="cajera_id">${cajeraOpts}</select>`
             : `<input value="${esc(cajeraFija.nombre)}" disabled />`}</div>
-          <div><label>Monto a retirar</label><input type="number" inputmode="decimal" step="any" name="monto" placeholder="50000" required autofocus /></div>
-          <div><label>💵 Propina (opcional)</label><input type="number" inputmode="decimal" step="any" name="propina" placeholder="0" /></div>
+          <div><label>Monto a retirar</label><input type="text" inputmode="decimal" name="monto" placeholder="50000" required autofocus /></div>
+          <div><label>💵 Propina (opcional)</label><input type="text" inputmode="decimal" name="propina" placeholder="0" /></div>
         </div>
         <p class="muted" id="r-saldo" style="margin:8px 0 0"></p>
         <p class="muted" style="margin:6px 0 0;font-size:12px">La <b>propina</b> no toca el saldo; se resta del profit y se informa en Reportes.</p>
@@ -2230,7 +2231,7 @@ function abrirGanancia(cajeraFija) {
           <div><label>Cajera</label>${seleccionable
             ? `<select name="cajera_id">${cajeraOpts}</select>`
             : `<input value="${esc(cajeraFija.nombre)}" disabled />`}</div>
-          <div><label>Ganancia</label><input type="number" inputmode="decimal" step="any" name="monto" placeholder="50000" required autofocus /></div>
+          <div><label>Ganancia</label><input type="text" inputmode="decimal" name="monto" placeholder="50000" required autofocus /></div>
         </div>
         <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Bono retirado sin apostar" /></div>
       </div>
@@ -2418,12 +2419,12 @@ function abrirTransferir(prefill) {
               <option value="cuenta_a_cajero">Cuenta → Cajero</option>
             </select>
           </div>
-          <div><label>Monto a transferir</label><input type="number" inputmode="decimal" step="any" name="monto" placeholder="100000" required autofocus /></div>
+          <div><label>Monto a transferir</label><input type="text" inputmode="decimal" name="monto" placeholder="100000" required autofocus /></div>
           <div><label>Cajero</label><select name="cajero_id">${cajeroOpts}</select></div>
           <div><label>Cuenta</label><select name="cuenta_id">${cuentaOpts}</select></div>
         </div>
         <div id="t-bono-wrap" style="margin-top:12px"></div>
-        <div style="margin-top:12px"><label>💵 Propina (opcional, no va a la cuenta; se resta del profit)</label><input type="number" inputmode="decimal" step="any" name="propina" placeholder="0" /></div>
+        <div style="margin-top:12px"><label>💵 Propina (opcional, no va a la cuenta; se resta del profit)</label><input type="text" inputmode="decimal" name="propina" placeholder="0" /></div>
         <div style="margin-top:12px"><label>Nota (opcional)</label><input name="nota" placeholder="Transferencia" /></div>
         <div id="t-resumen" class="resolver-totales" style="margin-top:14px"></div>
       </div>
@@ -2646,7 +2647,7 @@ function opcionesAdmin(selId) {
 function viewConfig() {
   const casas = state.casas.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
-    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Bono % <input type="number" inputmode="decimal" step="any" data-bono-casa="${c.id}" value="${num(c.bono_pct)}" style="width:80px" /></label>
+    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Bono % <input type="text" inputmode="decimal" data-bono-casa="${c.id}" value="${num(c.bono_pct)}" style="width:80px" /></label>
     <button class="btn-danger btn-sm" data-del-casa="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
@@ -2672,7 +2673,7 @@ function viewConfig() {
       <div style="margin-bottom:14px">${casas || `<span class="muted">Sin casas</span>`}</div>
       <div class="row">
         <div class="field"><label>Nombre</label><input id="casa-nombre" placeholder="Ej. Vira" /></div>
-        <div class="field"><label>Bono % (al depositar)</label><input id="casa-bono" type="number" inputmode="decimal" step="any" value="0" /></div>
+        <div class="field"><label>Bono % (al depositar)</label><input id="casa-bono" type="text" inputmode="decimal" value="0" /></div>
         <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="casa-cajeras" style="width:auto" /> 💰 Tiene cajeras (descuenta saldo)
         </label>
@@ -2708,7 +2709,7 @@ function viewConfig() {
       <h2>Bonos</h2>
       <div style="margin-bottom:14px">${bonos || `<span class="muted">Sin bonos</span>`}</div>
       <div class="row">
-        <div class="field"><label>Porcentaje (%)</label><input id="bono-pct" type="number" inputmode="decimal" step="any" placeholder="15" style="max-width:140px" /></div>
+        <div class="field"><label>Porcentaje (%)</label><input id="bono-pct" type="text" inputmode="decimal" placeholder="15" style="max-width:140px" /></div>
         <button class="btn-primary" id="add-bono">Agregar bono</button>
       </div>
       <p class="muted" style="margin:8px 0 0">Listado de bonos elegibles al transferir a un cajero y al cargar una apuesta. El bono de la apuesta no afecta lo apostado; se usa para el profit.</p>
@@ -2716,7 +2717,7 @@ function viewConfig() {
     <div class="card">
       <h2>Ajustes</h2>
       <div class="row">
-        <div class="field"><label>Comisión de cuentas (%)</label><input id="comision-pct" type="number" inputmode="decimal" step="any" value="${comisionCuentaPct()}" style="max-width:140px" /></div>
+        <div class="field"><label>Comisión de cuentas (%)</label><input id="comision-pct" type="text" inputmode="decimal" value="${comisionCuentaPct()}" style="max-width:140px" /></div>
       </div>
       <p class="muted" style="margin:8px 0 0">Se cobra en cada transferencia entre cajero y cuenta y se descuenta del profit.</p>
     </div>
