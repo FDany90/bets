@@ -434,7 +434,14 @@ function creditoCajera(a) {
 }
 
 // Saldo y desglose de una cajera ({id, nombre})
+// Cache de saldos por render: resumenCajera se llama muchísimas veces (cards,
+// filas de apuesta, orden). Se limpia al inicio de cada render() y al recargar.
+const _resumenCache = new Map();
+function limpiarCacheSaldos() { _resumenCache.clear(); }
 function resumenCajera(c) {
+  if (!c) return { saldo: 0, cargado: 0, retirado: 0, apostado: 0, ganado: 0, transferIn: 0, transferOut: 0, nApuestas: 0 };
+  const hit = _resumenCache.get(c.id);
+  if (hit) return hit;
   const movs = state.movimientos.filter((m) => m.cajera_id === c.id);
   const cargado = movs.filter((m) => m.tipo === "Carga").reduce((s, m) => s + efectoMovimiento(m), 0);
   // Retiro descuenta el monto + la propina (la propina también sale del saldo).
@@ -456,7 +463,9 @@ function resumenCajera(c) {
   // Apostar descuenta; ganar y cargar suman; retirar y transferir a otro restan.
   // El saldo nunca queda negativo: piso en 0.
   const saldo = Math.max(0, cargado + ganado - apostado - retirado + transferIn - transferOut);
-  return { saldo, cargado, retirado, apostado, ganado, transferIn, transferOut, nApuestas: aps.length };
+  const res = { saldo, cargado, retirado, apostado, ganado, transferIn, transferOut, nApuestas: aps.length };
+  _resumenCache.set(c.id, res);
+  return res;
 }
 
 // Última actividad de una cajera (ms): lo más reciente entre sus movimientos
@@ -670,6 +679,7 @@ function actualizarUltimaAct() {
 //   RENDER PRINCIPAL
 // ============================================================
 function render() {
+  limpiarCacheSaldos(); // saldos frescos por render (state no cambia durante el render)
   // banner de config
   if (!CONFIGURADO) {
     $("#banner").innerHTML = `<div class="banner">⚙️ Falta conectar la base de datos. Abrí <b>config.js</b> y pegá tu URL y anon key de Supabase. Mirá <b>README.md</b> para los pasos.</div>`;
@@ -1196,6 +1206,12 @@ function abrirModalPartido(partido) {
           <div style="grid-column:1/-1"><label>Partido / Evento</label><input name="nombre" value="${esc(p.nombre)}" required placeholder="PSG vs Arsenal" /></div>
           <div><label>Fecha</label><input type="date" name="fecha" value="${esc(p.fecha || "")}" /></div>
           <div><label>Hora</label><input name="hora" value="${esc(p.hora || "")}" placeholder="13 hs" /></div>
+          <div style="grid-column:1/-1">
+            <label>Resultados posibles (mínimo 2)</label>
+            <div id="p-resultados"></div>
+            <button type="button" class="btn-ghost btn-sm" id="p-add-res" style="margin-top:6px">+ Agregar resultado</button>
+            <p class="muted" style="margin:6px 0 0;font-size:12px">Se escriben una vez acá; después los elegís de un combo al cargar apuestas.</p>
+          </div>
         </div>
       </div>
       <div class="modal-foot">
@@ -1209,9 +1225,28 @@ function abrirModalPartido(partido) {
   const cerrar = () => { dlg.close(); dlg.remove(); };
   $("#p-cerrar", dlg).addEventListener("click", cerrar);
   $("#p-cancelar", dlg).addEventListener("click", cerrar);
+
+  // Lista dinámica de resultados posibles (mínimo 2).
+  let resultados = (Array.isArray(p.resultados) && p.resultados.length) ? [...p.resultados] : ["", ""];
+  const leerResultados = () => $$("#p-resultados input", dlg).map((inp) => inp.value);
+  const renderResultados = () => {
+    $("#p-resultados", dlg).innerHTML = resultados.map((r, i) => `
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
+        <input data-res="${i}" value="${esc(r)}" placeholder="Resultado ${i + 1} (ej. 1 / X / 2)" />
+        ${resultados.length > 2 ? `<button type="button" class="btn-danger btn-sm" data-rm-res="${i}" title="Quitar">✕</button>` : ""}
+      </div>`).join("");
+    $$("[data-rm-res]", dlg).forEach((b) => b.addEventListener("click", () => {
+      resultados = leerResultados();
+      resultados.splice(+b.dataset.rmRes, 1);
+      renderResultados();
+    }));
+  };
+  renderResultados();
+  $("#p-add-res", dlg).addEventListener("click", () => { resultados = leerResultados(); resultados.push(""); renderResultados(); });
+
   $("#form-partido", dlg).addEventListener("submit", (e) => {
     e.preventDefault();
-    guardarPartido(dlg, editando ? p.id : null).then((ok) => { if (ok) cerrar(); });
+    guardarPartido(dlg, editando ? p.id : null, leerResultados()).then((ok) => { if (ok) cerrar(); });
   });
 }
 
@@ -1219,6 +1254,7 @@ function abrirModalPartido(partido) {
 //   MODAL: Nueva / Editar apuesta (dentro de un partido)
 // ============================================================
 let modalLineas = []; // working copy mientras el modal está abierto
+let modalPartidoResultados = []; // resultados posibles del partido (combo en las líneas)
 let modalBonoPct = 0; // bono elegido en el modal de editar apuesta
 
 function casaPermiteGratis(nombre) {
@@ -1231,12 +1267,22 @@ function nuevaLinea(casa = "") {
   return { casa, cajera: "", monto_cargado: "", bono_pct: 0, apuesta_bono_pct: 0, cuota: "", resultado: "", apuesta_gratis: "" };
 }
 
+// Campo de resultado de una línea: combo con los resultados del partido si los
+// tiene; si no, un input libre (partidos viejos sin resultados cargados).
+function resultadoFieldHtml(l) {
+  const rs = modalPartidoResultados || [];
+  if (!rs.length) return `<input data-f="resultado" value="${esc(l.resultado || "")}" placeholder="PSG / Empate" />`;
+  const opts = l.resultado && !rs.includes(l.resultado) ? [...rs, l.resultado] : rs;
+  return `<select data-f="resultado"><option value="">— resultado —</option>${opts.map((r) => `<option ${r === l.resultado ? "selected" : ""}>${esc(r)}</option>`).join("")}</select>`;
+}
+
 function abrirModal(apuesta, partidoId) {
   if (!apuesta) return abrirModalNueva(partidoId); // alta: una fila por cajera → varias apuestas
   const editando = true;
   const a = apuesta;
   const pid = editando ? a.partido_id : partidoId;
   const partido = state.partidosById[pid];
+  modalPartidoResultados = (partido && Array.isArray(partido.resultados)) ? partido.resultados : [];
   // líneas: las existentes, o las casas por defecto
   modalLineas = editando
     ? a.lineas.map((l) => ({ ...l }))
@@ -1303,6 +1349,7 @@ function selectCajera(sel) {
 // ----- Alta de apuestas: una fila por cajera → se crea una apuesta por cajera -----
 function abrirModalNueva(partidoId) {
   const partido = state.partidosById[partidoId];
+  modalPartidoResultados = (partido && Array.isArray(partido.resultados)) ? partido.resultados : [];
   modalLineas = (CFG.CASAS_POR_DEFECTO || ["Vira"]).map((n) => nuevaLinea(n));
 
   const dlg = document.createElement("dialog");
@@ -1355,7 +1402,7 @@ function renderLineasNueva(dlg) {
       <div><label>Cargado (real)</label><input type="number" inputmode="decimal" step="any" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
       ${gratisField}
       <div><label>Cuota</label><input type="number" inputmode="decimal" step="any" data-f="cuota" value="${l.cuota}" /></div>
-      <div><label>Resultado</label><input data-f="resultado" value="${esc(l.resultado || "")}" placeholder="PSG / Empate" /></div>
+      <div><label>Resultado</label>${resultadoFieldHtml(l)}</div>
       <div class="linea-bono"><label>Bono (para profit, no afecta lo apostado)</label>${bonoChipsHtml(l.apuesta_bono_pct)}</div>
       <div class="calc"><span class="calc-txt">apostado<b>${money(c.apostado)}</b>premio ${money(c.premio)}${num(l.apuesta_bono_pct) > 0 ? ` · bono ${money(num(l.monto_cargado) * num(l.apuesta_bono_pct) / (100 + num(l.apuesta_bono_pct)))}` : ""}</span>
         <button type="button" class="btn-danger btn-sm" data-rm="${i}" style="margin-top:4px">✕</button></div>
@@ -1465,7 +1512,7 @@ function renderLineas(dlg) {
       <div><label>Cargado (real)</label><input type="number" inputmode="decimal" step="any" data-f="monto_cargado" value="${l.monto_cargado}" /></div>
       ${gratisField}
       <div><label>Cuota</label><input type="number" inputmode="decimal" step="any" data-f="cuota" value="${l.cuota}" /></div>
-      <div><label>Resultado</label><input data-f="resultado" value="${esc(l.resultado || "")}" placeholder="PSG / Empate" /></div>
+      <div><label>Resultado</label>${resultadoFieldHtml(l)}</div>
       <div class="calc"><span class="calc-txt">apostado<b>${money(c.apostado)}</b>premio ${money(c.premio)}</span>
         <button type="button" class="btn-danger btn-sm" data-rm="${i}" style="margin-top:4px">✕</button></div>
     </div>`;
@@ -1517,13 +1564,16 @@ function actualizarResumen(dlg) {
 // ============================================================
 //   PERSISTENCIA
 // ============================================================
-async function guardarPartido(dlg, id) {
+async function guardarPartido(dlg, id, resultadosRaw) {
   if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
   const f = $("#form-partido", dlg);
+  // Resultados posibles: sin vacíos ni duplicados, en orden.
+  const resultados = [...new Set((resultadosRaw || []).map((r) => (r || "").trim()).filter(Boolean))];
   const payload = {
     nombre: f.nombre.value.trim(),
     fecha: f.fecha.value || null,
     hora: f.hora.value.trim() || null,
+    resultados,
   };
   let res;
   if (id) res = await sb.from("partidos").update(payload).eq("id", id);
@@ -1666,10 +1716,11 @@ function abrirDetalle(a) {
 function abrirResolverPartido(p) {
   if (!p) return;
   const aps = apuestasDePartido(p.id);
-  // unión de todos los resultados cubiertos por las líneas de todas las apuestas
-  const resultados = [...new Set(
-    aps.flatMap((a) => (a.lineas || []).map((l) => (l.resultado || "").trim())).filter(Boolean)
-  )];
+  // resultados posibles del partido + los cubiertos por las líneas de las apuestas
+  const resultados = [...new Set([
+    ...((Array.isArray(p.resultados) ? p.resultados : []).map((r) => (r || "").trim())),
+    ...aps.flatMap((a) => (a.lineas || []).map((l) => (l.resultado || "").trim())),
+  ].filter(Boolean))];
 
   const dlg = document.createElement("dialog");
   dlg.innerHTML = `
@@ -1808,9 +1859,11 @@ function viewCajeras() {
 
   // Orden: por saldo disponible (mayor a menor) o por actividad más reciente.
   const porSaldo = state.cajerasOrden === "saldo";
-  const lista = (tab === "cuenta" ? cuentas : cajeros).slice().sort((a, b) =>
-    porSaldo ? resumenCajera(b).saldo - resumenCajera(a).saldo
-             : ultimaActividadCajera(b) - ultimaActividadCajera(a));
+  // Clave de orden calculada una sola vez por cajera (no en cada comparación).
+  const lista = (tab === "cuenta" ? cuentas : cajeros)
+    .map((c) => ({ c, k: porSaldo ? resumenCajera(c).saldo : ultimaActividadCajera(c) }))
+    .sort((a, b) => b.k - a.k)
+    .map((x) => x.c);
 
   const chips = [["cajero", "Cajeros", cajeros.length], ["cuenta", "Cuentas", cuentas.length]]
     .map(([v, t, n]) => `<button class="chip-f ${tab === v ? "active" : ""}" data-cajtab="${v}">${t} <span class="chip-n">${n}</span></button>`).join("");

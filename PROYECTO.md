@@ -41,6 +41,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 | `migracion-bonos.sql` | Migración que agregó la tabla `bonos` (listado de %) + `apuestas.bono_pct` (bono elegido por apuesta, para profit) |
 | `migracion-propina.sql` | Migración que agregó `movimientos.propina` y `transferencias.propina` (propina al retirar/transferir; gasto contra profit) |
 | `migracion-cajera-activo.sql` | Migración que agregó `cajeras.activo` (desactivar un cajero para la carga de apuestas) |
+| `migracion-partido-resultados.sql` | Migración que agregó `partidos.resultados` (jsonb: resultados posibles del partido, para elegir en un combo al cargar apuestas) |
 | `reset-datos.sql` | Borra partidos/apuestas/líneas/movimientos (empezar de cero), mantiene casas y cajeras |
 | `dist/` | Copia de los 4 archivos web para Netlify Drop (gitignored) |
 | `README.md` | Pasos de puesta en marcha |
@@ -76,6 +77,7 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 
 **`partidos`** — un partido/evento que agrupa N apuestas
 - `id` uuid · `nombre` text · `fecha` date · `hora` text · `resultado_ganador` text (null = Pendiente; con valor = Finalizado) · `bono_retiro` numeric (**snapshot** al resolver: Σ por cajera del partido con `saldo_retiro` on del **monto de bono de su última carga** (`carga.monto × bono%/100`); suma al profit. Al resolver se **apaga** `saldo_retiro` de esas cajeras → se cuenta una sola vez) · `bono_apuestas` numeric (snapshot legacy del bono por partido; ya no se escribe, pero se usó **una vez** para restaurar `apuestas.bono_pct` sin perder el profit histórico —ver `migrarBonoApuestas`, flag `config.bono_apuestas_migrado`) · `creado_en`
+- `resultados` jsonb (array de strings): **resultados posibles** del partido (ej. `["1","X","2"]`), cargados al crear el partido; se eligen de un **combo** al cargar apuestas y aparecen en el dropdown del popup Resolver.
 - Estado del partido **derivado**: `Pendiente` si `resultado_ganador` es null, `Finalizado` si tiene valor.
 
 **`apuestas`** — una apuesta dentro de un partido (un set de casas/líneas)
@@ -133,7 +135,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
 **Tab Reportes** — KPIs en orden: **Profit total actual** (= histórico − Σ retiros de ganancia) · **Profit total histórico** (= Σ profit real de resueltas + Σ **bono por apuesta** (`ingresado × %/(100+%)`, % elegido en la apuesta) + ganancias manuales + Σ `bono_retiro` de partidos resueltos **menos Σ `comision`** de transferencias **menos Σ propinas** (retiros + transferencias)). El **bono por apuesta y las propinas respetan el filtro de cajera**; `bono_retiro` y comisiones se omiten con filtro de cajera. KPIs extra **Comisiones cuentas** y **Propinas** (negativos). Botones **💸 Retirar ganancia**, **📜 Retiros**, **🔁 Transferencias**, **💵 Propinas** (informe con el detalle y el total). · Transferencia recibido · Total ingresado · Total saldo cajeras actual · Total en apuestas pendientes · Apuestas resueltas · % promedio. Botones **💸 Retirar ganancia** y **📜 Retiros**. Tablas: profit por mes, por cajera, ingresado por casa. **Filtros:** período (Todo / Semana / Mes / Personalizado), cajera, rango de ingresado. (Con filtro de cajera, el `bono_retiro` se omite por ser un agregado por partido.)
 
 **Tab Partidos** (home) — tarjetas de partido con apuestas anidadas. **Orden:** pendientes por **fecha/hora ascendente** (el más próximo primero); **finalizados descendente** (el más reciente primero); en "Todos" van los pendientes arriba y los finalizados abajo. **Chips** Pendientes/Finalizados/Todos (arranca en Pendientes). **Paginado** de 10.
-  - **Flujo:** `+ Nuevo partido` → dentro `+ Agregar apuesta` (botón ghost, chico, arriba de la tabla) → `✅ Resolver` una vez.
+  - **Flujo:** `+ Nuevo partido` (con nombre/fecha/hora + **resultados posibles**: lista dinámica, mínimo 2, botón "+ Agregar resultado") → dentro `+ Agregar apuesta` (el **Resultado** se elige de un **combo** con esos resultados; input libre si el partido no tiene ninguno) → `✅ Resolver` una vez.
   - **Tarjeta:** **título grande coloreado por estado** (ámbar=Pendiente, azul=Finalizado) + **borde lateral y superior** del mismo color (separa visualmente dónde empieza cada partido), header + totales (nº apuestas, ingresado, profit, **Bono estimado**, **Bono retiro**, **Profit + bono (est.)** = profit + bono estimado + bono retiro). Botones 🗑️/✏️, ✅ Resolver / ↩️ Cambiar resultado. **Desplegable** con toggle "▸ Más / ▾ Menos".
   - **Apuesta (fila):** **nombre de la cajera** (en **verde + ✓** si tiene `saldo_retiro` activado) + **etiqueta del admin en color** (● Nombre) y **borde lateral** del mismo color (distingue por admin; color fijo por nombre: Dani=rojo, Nico=azul, Kelvin=amarillo; resto por paleta) + **Saldo** (chico, gris). Las apuestas del partido se **ordenan por cuota** (la más baja arriba, la más alta abajo) y las **cuotas altas** se resaltan en negrita y color (≥5 dorado, ≥10 naranja). · resultado/cuota por casa · ingresado · premio (potencial si pendiente) · profit (oculto si pendiente, real si resuelto). Botones 🗑️/✏️/👁️. (Se quitaron las columnas Estado y profit potencial.)
   - **Popup Resolver:** dropdown del resultado + preview por apuesta (el bono ya no se elige acá: es el de cada apuesta, ver abajo) + preview por apuesta + **bloque de totales**: Profit total cajeras · Bono de depósito (el editado) · Bono por saldo de retiro · **Total** (grande). Al guardar **consume el saldo de retiro** de esas cajeras (se cuenta una sola vez) y **activa "Pendiente de retiro"** (rojo) en todas las cajeras del partido. "Pendiente" lo reabre (anula ambos bonos; descongela `bono_apuestas`; **no** desactiva el rojo, se hace a mano al retirar).
@@ -172,6 +174,7 @@ Marcador manual `cajeras.saldo_retiro`: se prende cuando a la cajera ya se le ca
    15. `migracion-bonos.sql` — tabla `bonos` + `apuestas.bono_pct`.
    16. `migracion-propina.sql` — `movimientos.propina` + `transferencias.propina`.
    17. `migracion-cajera-activo.sql` — `cajeras.activo`.
+   18. `migracion-partido-resultados.sql` — `partidos.resultados`.
    - `reset-datos.sql` (opcional): borra partidos/apuestas/líneas/movimientos, mantiene casas/cajeras.
 3. Settings → API → copiar URL + publishable/anon key en `config.js`.
 4. Abrir `index.html` (o deployar). En Configuración: setear Bono % de cada casa, marcar "tiene cajeras", y asociar cada cajera a su casino.
