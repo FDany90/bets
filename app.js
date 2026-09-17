@@ -35,6 +35,7 @@ const state = {
   filtroEstado: "Pendiente",  // estado de partido ("" = todos | "Pendiente" | "Finalizado")
   filtroRep: { periodo: "todo", desde: "", hasta: "", cajera: "", montoMin: "", montoMax: "" },
   cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
+  cajerasOrden: "actividad", // "actividad" | "saldo" — orden de las cards de cajeras
   filtroAdmin: "",    // "" = todos · "none" = sin admin · <id> = ese admin
   filtroCasa: "",     // "" = todos · <id> = ese casino (solo aplica a Cajeros)
 };
@@ -1806,9 +1807,11 @@ function viewCajeras() {
   const cuentas = state.cajeras.filter((c) => esCuenta(c) && pasaAdmin(c));
   const tab = state.cajerasTab === "cuenta" ? "cuenta" : "cajero";
 
-  // Orden: actividad más reciente primero.
-  const lista = (tab === "cuenta" ? cuentas : cajeros)
-    .slice().sort((a, b) => ultimaActividadCajera(b) - ultimaActividadCajera(a));
+  // Orden: por saldo disponible (mayor a menor) o por actividad más reciente.
+  const porSaldo = state.cajerasOrden === "saldo";
+  const lista = (tab === "cuenta" ? cuentas : cajeros).slice().sort((a, b) =>
+    porSaldo ? resumenCajera(b).saldo - resumenCajera(a).saldo
+             : ultimaActividadCajera(b) - ultimaActividadCajera(a));
 
   const chips = [["cajero", "Cajeros", cajeros.length], ["cuenta", "Cuentas", cuentas.length]]
     .map(([v, t, n]) => `<button class="chip-f ${tab === v ? "active" : ""}" data-cajtab="${v}">${t} <span class="chip-n">${n}</span></button>`).join("");
@@ -1839,10 +1842,12 @@ function viewCajeras() {
 
   const saldoTotal = lista.reduce((s, c) => s + resumenCajera(c).saldo, 0);
 
+  const btnOrden = `<button class="btn-ghost ${porSaldo ? "activo" : ""}" id="ordenar-cajeras" title="Ordenar por saldo disponible (mayor a menor)">↕️ ${porSaldo ? "Por saldo ↓" : "Por actividad"}</button>`;
   const toolbar = tab === "cuenta"
     ? `<div class="toolbar">
         <button class="btn-primary" id="transferir">🔁 Transferir</button>
         <button class="btn-ghost" id="ver-transf">📜 Transferencias</button>
+        ${btnOrden}
         <div class="spacer"></div>
         <span class="muted">Comisión ${comisionCuentaPct()}% · ${cuentas.length} cuenta(s)</span>
       </div>`
@@ -1851,6 +1856,7 @@ function viewCajeras() {
         <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
         <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
         <button class="btn-ghost" id="transferir">🔁 Transferir</button>
+        ${btnOrden}
         <div class="spacer"></div>
         <span class="muted">${cajeros.length} cajero(s)</span>
       </div>`;
@@ -1953,6 +1959,7 @@ function bindCajeras() {
   $$("[data-cajtab]").forEach((b) => b.addEventListener("click", () => { state.cajerasTab = b.dataset.cajtab; render(); }));
   $("#filtro-admin")?.addEventListener("change", (e) => { state.filtroAdmin = e.target.value; render(); });
   $("#filtro-casa")?.addEventListener("change", (e) => { state.filtroCasa = e.target.value; render(); });
+  $("#ordenar-cajeras")?.addEventListener("click", () => { state.cajerasOrden = state.cajerasOrden === "saldo" ? "actividad" : "saldo"; render(); });
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
