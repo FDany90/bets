@@ -41,11 +41,15 @@ const state = {
 
 // Admin (dueño) de una cajera/cuenta, o null.
 const adminDeCajera = (c) => (c && c.admin_id ? state.adminsById[c.admin_id] : null);
-// Color por admin (para distinguir apuestas). Se asigna por orden (los admins se
-// cargan alfabéticos): 0=púrpura, 1=azul, luego otros. Ej: Dani=púrpura, Nico=azul.
-const ADMIN_COLORS = ["#f87171", "#6cb0ff", "#34d399", "#e3b341", "#f472b6", "#fb923c", "#2dd4bf", "#a78bfa"];
+// Color por admin (para distinguir apuestas). Colores fijos por nombre para los
+// admins conocidos; el resto toma un color de la paleta por orden.
+const ADMIN_COLOR_NOMBRE = { dani: "#f87171", nico: "#6cb0ff", kelvin: "#f5c518" };
+const ADMIN_COLORS = ["#a78bfa", "#34d399", "#f472b6", "#fb923c", "#2dd4bf", "#e3b341", "#f87171", "#6cb0ff"];
 const colorAdmin = (admin) => {
   if (!admin) return "";
+  if (admin.color) return admin.color;
+  const key = (admin.nombre || "").trim().toLowerCase();
+  if (ADMIN_COLOR_NOMBRE[key]) return ADMIN_COLOR_NOMBRE[key];
   const i = state.admins.findIndex((a) => a.id === admin.id);
   return ADMIN_COLORS[(i >= 0 ? i : 0) % ADMIN_COLORS.length];
 };
@@ -361,12 +365,25 @@ function potencialPorCasa(a) {
 }
 
 // Lista por casa de "resultado @ cuota" de una apuesta (para verlo en la fila)
+// Clase para resaltar la cuota según su valor (más alta = más marcada).
+function claseCuota(c) {
+  if (c >= 10) return "cuota-xalta";
+  if (c >= 5) return "cuota-alta";
+  return "";
+}
+// Cuota "representativa" de una apuesta (la más alta entre sus líneas) para ordenar.
+function cuotaMaxApuesta(a) {
+  return (a.lineas || []).reduce((mx, l) => Math.max(mx, num(l.cuota)), 0);
+}
+
 function lineasApuestaHtml(a) {
   const ls = (a.lineas || []).filter((l) => l.casa || l.resultado || l.cuota != null && l.cuota !== "");
   if (!ls.length) return "—";
   return `<div class="pot-list">${ls.map((l) => {
-    const cuota = (l.cuota == null || l.cuota === "") ? "—" : num(l.cuota);
-    return `<div class="pot-row"><span class="pot-casa">${esc(l.casa || "—")}</span><span>${esc(l.resultado || "—")} @ ${cuota}</span></div>`;
+    const tiene = !(l.cuota == null || l.cuota === "");
+    const cuotaVal = num(l.cuota);
+    const cuotaHtml = tiene ? `<b class="cuota ${claseCuota(cuotaVal)}">${cuotaVal}</b>` : "—";
+    return `<div class="pot-row"><span class="pot-casa">${esc(l.casa || "—")}</span><span>${esc(l.resultado || "—")} @ ${cuotaHtml}</span></div>`;
   }).join("")}</div>`;
 }
 
@@ -1078,7 +1095,8 @@ function cardPartido(p) {
   const bonoRet = num(p.bono_retiro);
   const bonoTotal = bonoEst + bonoRet;
   const abierto = !state.partidosColapsados.has(p.id);
-  const filas = cp.aps.map(filaApuesta).join("");
+  // Orden: apuestas por cuota, la más baja arriba y la más alta abajo.
+  const filas = cp.aps.slice().sort((a, b) => cuotaMaxApuesta(a) - cuotaMaxApuesta(b)).map(filaApuesta).join("");
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
 
   return `<div class="card partido estado-${est}">
