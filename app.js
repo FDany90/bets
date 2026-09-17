@@ -41,6 +41,14 @@ const state = {
 
 // Admin (dueño) de una cajera/cuenta, o null.
 const adminDeCajera = (c) => (c && c.admin_id ? state.adminsById[c.admin_id] : null);
+// Color por admin (para distinguir apuestas). Se asigna por orden (los admins se
+// cargan alfabéticos): 0=púrpura, 1=azul, luego otros. Ej: Dani=púrpura, Nico=azul.
+const ADMIN_COLORS = ["#a78bfa", "#6cb0ff", "#34d399", "#e3b341", "#f472b6", "#fb923c", "#2dd4bf", "#f87171"];
+const colorAdmin = (admin) => {
+  if (!admin) return "";
+  const i = state.admins.findIndex((a) => a.id === admin.id);
+  return ADMIN_COLORS[(i >= 0 ? i : 0) % ADMIN_COLORS.length];
+};
 
 // % de comisión que cobran las cuentas por transferencia (global, configurable).
 const COMISION_CUENTA_DEFAULT = 5;
@@ -1038,8 +1046,12 @@ function filaApuesta(a) {
   // Cajera con "saldo de retiro" activado → nombre en verde (lista para retirar)
   const conRetiro = !!(cajObj && cajObj.saldo_retiro);
   const nombreHtml = `<span class="cajera-nombre ${conRetiro ? "retiro-ok" : ""}">${esc(a.cajera || "—")}${conRetiro ? ` <span class="retiro-tick" title="Saldo de retiro listo">✓</span>` : ""}</span>`;
-  return `<tr>
-    <td data-label="Cajera">${nombreHtml}${saldoTxt}</td>
+  // Admin de la cajera → etiqueta de color + borde lateral en la fila
+  const admin = adminDeCajera(cajObj);
+  const adminCol = colorAdmin(admin);
+  const adminTag = admin ? ` <span class="admin-tag" style="color:${adminCol}">● ${esc(admin.nombre)}</span>` : "";
+  return `<tr class="apuesta-row"${admin ? ` style="--admin-col:${adminCol}"` : ""}>
+    <td data-label="Cajera">${nombreHtml}${adminTag}${saldoTxt}</td>
     <td data-label="Resultado / Cuota">${lineasApuestaHtml(a)}</td>
     <td class="num" data-label="Ingresado">${money(c.ingresado)}</td>
     <td class="num" data-label="${pend ? "Premio potencial" : "Premio"}">${premioCell}</td>

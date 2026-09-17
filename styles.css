@@ -258,6 +258,14 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .cajera-nombre.retiro-ok { color: var(--accent-hover); font-weight: 700; }
 .retiro-tick { color: var(--accent-hover); }
 
+/* Admin de la apuesta: etiqueta de color + borde lateral en la fila */
+.admin-tag { font-size: 12px; font-weight: 700; white-space: nowrap; margin-left: 4px; }
+.apuestas-tbl tr.apuesta-row > td:first-child { border-left: 4px solid var(--admin-col, transparent); padding-left: 10px; }
+@media (max-width: 720px) {
+  .apuestas-tbl tr.apuesta-row { border-left-width: 4px; border-left-color: var(--admin-col, var(--border)); }
+  .apuestas-tbl tr.apuesta-row > td:first-child { border-left: none; padding-left: 0; }
+}
+
 /* Acciones de la fila: eliminar/editar a la izquierda, resolver/detalle a la derecha */
 .acciones { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
 .acc-left, .acc-right { display: flex; gap: 6px; flex-wrap: wrap; }
