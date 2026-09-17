@@ -67,11 +67,11 @@ App web para registrar apuestas y llevar el historial de ganancias, reemplazando
 - `clave` text (PK) · `valor` text. Hoy guarda `comision_cuenta_pct` (% de comisión de las cuentas, default 5).
 
 **`transferencias`** — mueve plata entre un cajero y una cuenta (con comisión / bono)
-- `id` uuid · `origen_id` uuid (FK → cajeras, on delete set null) · `destino_id` uuid (FK → cajeras) · `origen_nombre` / `destino_nombre` text (snapshots por si se borra la cajera) · `monto` numeric (lo que sale del origen) · `comision_pct` / `comision` numeric (solo cajero → cuenta) · `bono_pct_destino` / `bono_destino` numeric (**snapshot** del bono de depósito del casino del cajero destino; solo cuenta → cajero) · `propina` numeric (propina pagada; no toca saldos, se resta del profit) · `nota` text · `creado_en`
+- `id` uuid · `origen_id` uuid (FK → cajeras, on delete set null) · `destino_id` uuid (FK → cajeras) · `origen_nombre` / `destino_nombre` text (snapshots por si se borra la cajera) · `monto` numeric (lo que sale del origen) · `comision_pct` / `comision` numeric (solo cajero → cuenta) · `bono_pct_destino` / `bono_destino` numeric (**snapshot** del bono de depósito del casino del cajero destino; solo cuenta → cajero) · `propina` numeric (propina pagada; **sale del saldo del origen** (origen pierde monto + propina) y se resta del profit) · `nota` text · `creado_en`
 - Efecto: origen −`monto`, destino +(`monto` − `comision` + `bono_destino`). La `comision` (solo al entrar a una **cuenta**) es un **gasto** que baja el profit. El `bono_destino` (solo al entrar a un **cajero** con casino) infla el saldo del cajero, igual que una Carga con bono (no es profit directo). Historial propio, separado de `retiros_ganancia`.
 
 **`movimientos`** — cargas y retiros manuales de dinero por cajera
-- `id` uuid · `cajera_id` uuid (FK → cajeras, on delete cascade) · `tipo` text ('Carga'|'Retiro'|'Ganancia') · `monto` numeric (base ingresado, positivo) · `bono_pct` numeric (bono aplicado en la carga; 0 si sin bono/retiro) · `casa` text (en qué casa se cargó, define el bono) · `propina` numeric (solo Retiro: propina pagada; **no toca el saldo**, se resta del profit) · `nota` text · `creado_en`
+- `id` uuid · `cajera_id` uuid (FK → cajeras, on delete cascade) · `tipo` text ('Carga'|'Retiro'|'Ganancia') · `monto` numeric (base ingresado, positivo) · `bono_pct` numeric (bono aplicado en la carga; 0 si sin bono/retiro) · `casa` text (en qué casa se cargó, define el bono) · `propina` numeric (solo Retiro: propina pagada; **sale del saldo** (Retiro descuenta monto + propina) y se resta del profit) · `nota` text · `creado_en`
 - Los débitos/créditos por apuestas **no** se guardan acá: se derivan de las apuestas.
 
 **`partidos`** — un partido/evento que agrupa N apuestas
@@ -110,8 +110,8 @@ Por **apuesta**:
 ### Saldo por cajera (billetera, derivado)
 El saldo **no se guarda**, se calcula, y **nunca queda negativo** (piso en 0). Solo las casas con `tiene_cajeras` (hoy **Vira**) mueven el saldo.
 `saldo(cajera) = max(0, Σ efecto(movimientos) − Σ apostado_vira + Σ ganado_vira + transferIn − transferOut)`
-- `efecto(Carga) = monto × (1 + bono_pct/100)` · `efecto(Retiro) = −monto`.
-- `transferOut = Σ monto` de las transferencias donde la cajera es **origen** (sale el monto completo).
+- `efecto(Carga) = monto × (1 + bono_pct/100)` · `efecto(Retiro) = −(monto + propina)` (la propina también sale del saldo).
+- `transferOut = Σ (monto + propina)` de las transferencias donde la cajera es **origen** (sale el monto completo + la propina).
 - `transferIn = Σ (monto − comision + bono_destino)` de las transferencias donde la cajera es **destino**. La `comision` (solo al entrar a una cuenta) no vuelve a nadie: es gasto contra profit. El `bono_destino` (solo al entrar a un cajero con casino) es el bono de depósito que infla el saldo.
 - `apostado_vira(apuesta) = Σ monto_cargado` de las líneas de casas con cajeras (se descuenta apenas existe la apuesta).
 - `ganado_vira(apuesta) = Σ premio` de las líneas con cajera cuyo `resultado == partido.resultado_ganador` (se acredita al resolver el partido). Si gana una casa sin cajera, no acredita.

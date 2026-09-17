@@ -258,8 +258,19 @@ tr:hover td { background: rgba(255, 255, 255, 0.04); }
 .cajera-nombre.retiro-ok { color: var(--accent-hover); font-weight: 700; }
 .retiro-tick { color: var(--accent-hover); }
 
-/* Botón activo (ej. ordenar por saldo) */
-.btn-ghost.activo { color: var(--accent-hover); border-color: rgba(46, 160, 67, 0.45); background: linear-gradient(160deg, rgba(46, 160, 67, 0.16), rgba(46, 160, 67, 0.04)); }
+/* Botón de ordenar cajeras (toggle actividad/saldo) — con aspecto claramente tocable */
+.btn-orden {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 14px; border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-strong); background: var(--bg-card); color: var(--text);
+  font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: border-color .15s ease, background-color .15s ease, transform .08s ease;
+}
+.btn-orden b { color: var(--accent-hover); font-weight: 800; }
+.btn-orden-hint { color: var(--text-dim); font-size: 11px; }
+.btn-orden:hover { border-color: var(--accent-hover); }
+.btn-orden:active { transform: scale(.97); }
+.btn-orden.activo { border-color: rgba(46, 160, 67, 0.55); background: linear-gradient(160deg, rgba(46, 160, 67, 0.18), rgba(46, 160, 67, 0.05)); }
 /* Cuota resaltada según su valor (más alta = más marcada) */
 .cuota { font-variant-numeric: tabular-nums; }
 .cuota-alta { font-weight: 800; color: #a78bfa; }

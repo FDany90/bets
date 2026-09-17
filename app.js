@@ -37,7 +37,6 @@ const state = {
   cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
   cajerasOrden: "actividad", // "actividad" | "saldo" — orden de las cards de cajeras
   filtroAdmin: "",    // "" = todos · "none" = sin admin · <id> = ese admin
-  filtroCasa: "",     // "" = todos · <id> = ese casino (solo aplica a Cajeros)
 };
 
 // Admin (dueño) de una cajera/cuenta, o null.
@@ -438,7 +437,8 @@ function creditoCajera(a) {
 function resumenCajera(c) {
   const movs = state.movimientos.filter((m) => m.cajera_id === c.id);
   const cargado = movs.filter((m) => m.tipo === "Carga").reduce((s, m) => s + efectoMovimiento(m), 0);
-  const retirado = movs.filter((m) => m.tipo === "Retiro").reduce((s, m) => s + num(m.monto), 0);
+  // Retiro descuenta el monto + la propina (la propina también sale del saldo).
+  const retirado = movs.filter((m) => m.tipo === "Retiro").reduce((s, m) => s + num(m.monto) + num(m.propina), 0);
 
   const aps = state.apuestas.filter((a) => a.cajera === c.nombre);
   const apostado = aps.reduce((s, a) => s + debitoCajera(a), 0);
@@ -446,8 +446,9 @@ function resumenCajera(c) {
 
   // Transferencias: el origen pierde el monto completo; el destino recibe el neto
   // (monto − comisión). La comisión no vuelve a nadie (es gasto, va contra profit).
+  // El origen pierde el monto + la propina (la propina la paga el origen desde su saldo).
   const transferOut = state.transferencias
-    .filter((t) => t.origen_id === c.id).reduce((s, t) => s + num(t.monto), 0);
+    .filter((t) => t.origen_id === c.id).reduce((s, t) => s + num(t.monto) + num(t.propina), 0);
   const transferIn = state.transferencias
     .filter((t) => t.destino_id === c.id)
     .reduce((s, t) => s + (num(t.monto) - num(t.comision) + num(t.bono_destino)), 0);
@@ -1798,12 +1799,10 @@ function viewCajeras() {
   if (!state.cajeras.length) {
     return `<div class="card"><p class="muted">No hay cajeras ni cuentas todavía. Agregá una en la pestaña <b>Configuración</b>.</p></div>`;
   }
-  // Filtro por admin (aplica a ambos sub-tabs) y por casino (solo Cajeros).
+  // Filtro por admin (aplica a ambos sub-tabs).
   const fAdmin = state.filtroAdmin;
   const pasaAdmin = (c) => fAdmin === "" || (fAdmin === "none" ? !c.admin_id : c.admin_id === fAdmin);
-  const fCasa = state.filtroCasa;
-  const pasaCasa = (c) => fCasa === "" || c.casa_id === fCasa;
-  const cajeros = state.cajeras.filter((c) => !esCuenta(c) && pasaAdmin(c) && pasaCasa(c));
+  const cajeros = state.cajeras.filter((c) => !esCuenta(c) && pasaAdmin(c));
   const cuentas = state.cajeras.filter((c) => esCuenta(c) && pasaAdmin(c));
   const tab = state.cajerasTab === "cuenta" ? "cuenta" : "cajero";
 
@@ -1824,16 +1823,6 @@ function viewCajeras() {
         <option value="none" ${fAdmin === "none" ? "selected" : ""}>Sin admin</option>
       </select>
     </div>` : "";
-  // Filtro por casino: solo en el sub-tab Cajeros y solo con casinos marcados.
-  const casasFiltro = state.casas.filter((x) => x.mostrar_filtro);
-  const casaFiltro = (tab === "cajero" && casasFiltro.length) ? `<div class="admin-filtro">
-      <label class="muted" style="margin:0">Casino</label>
-      <select id="filtro-casa">
-        <option value="" ${fCasa === "" ? "selected" : ""}>Todos</option>
-        ${casasFiltro.map((x) => `<option value="${x.id}" ${fCasa === x.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("")}
-      </select>
-    </div>` : "";
-
   const cards = lista.length
     ? lista.map(tab === "cuenta" ? cardCuenta : cardCajero).join("")
     : `<div class="card"><p class="muted">${tab === "cuenta"
@@ -1842,7 +1831,7 @@ function viewCajeras() {
 
   const saldoTotal = lista.reduce((s, c) => s + resumenCajera(c).saldo, 0);
 
-  const btnOrden = `<button class="btn-ghost btn-orden ${porSaldo ? "activo" : ""}" id="ordenar-cajeras" title="Ordenar por saldo disponible (mayor a menor)">↕️ ${porSaldo ? "Por saldo ↓" : "Por actividad"}</button>`;
+  const btnOrden = `<button class="btn-orden ${porSaldo ? "activo" : ""}" id="ordenar-cajeras" title="Tocá para cambiar el orden">⇅ Ordenar: <b>${porSaldo ? "Saldo ↓" : "Actividad"}</b> <span class="btn-orden-hint">▾</span></button>`;
   const toolbar = tab === "cuenta"
     ? `<div class="toolbar">
         <button class="btn-primary" id="transferir">🔁 Transferir</button>
@@ -1853,7 +1842,6 @@ function viewCajeras() {
     : `<div class="toolbar">
         <button class="btn-primary" id="cargar-saldo">💵 Cargar saldo</button>
         <button class="btn-ghost" id="retirar-saldo">🏧 Retirar</button>
-        <button class="btn-ghost" id="ganancia-manual">💰 Ganancia</button>
         <button class="btn-ghost" id="transferir">🔁 Transferir</button>
         <div class="spacer"></div>
         <span class="muted">${cajeros.length} cajero(s)</span>
@@ -1869,7 +1857,7 @@ function viewCajeras() {
       </div>
     </div>
     <div class="cajeras-subtabs">${chips}</div>
-    <div class="cajeras-controles">${btnOrden}${casaFiltro}${adminFiltro}</div>
+    <div class="cajeras-controles">${btnOrden}${adminFiltro}</div>
     ${toolbar}${cards}`;
 }
 
@@ -1902,7 +1890,6 @@ function cardCajero(c) {
           <button class="btn-primary btn-sm" data-cargar="${c.id}">💵 Cargar</button>
           <button class="btn-ghost btn-sm" data-transf-cajero="${c.id}">🔁 Transferir</button>
           <button class="btn-ghost btn-sm" data-retirar="${c.id}">🏧 Retirar</button>
-          <button class="btn-ghost btn-sm" data-ganancia="${c.id}">💰 Ganancia</button>
           <button class="btn-ghost btn-sm" data-movs="${c.id}">📜 Movimientos</button>
         </div>
       </div>
@@ -1957,7 +1944,6 @@ function bindCajeras() {
   const byId = (id) => state.cajeras.find((c) => c.id === id);
   $$("[data-cajtab]").forEach((b) => b.addEventListener("click", () => { state.cajerasTab = b.dataset.cajtab; render(); }));
   $("#filtro-admin")?.addEventListener("change", (e) => { state.filtroAdmin = e.target.value; render(); });
-  $("#filtro-casa")?.addEventListener("change", (e) => { state.filtroCasa = e.target.value; render(); });
   $("#ordenar-cajeras")?.addEventListener("click", () => { state.cajerasOrden = state.cajerasOrden === "saldo" ? "actividad" : "saldo"; render(); });
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
@@ -2148,13 +2134,15 @@ function abrirRetirar(cajeraFija) {
     const c = cajeraActual();
     const saldoActual = c ? resumenCajera(c).saldo : 0;
     $("#r-saldo", dlg).innerHTML = `Saldo disponible: <b class="${saldoActual >= 0 ? "pos" : "neg"}">${money(saldoActual)}</b>`;
-    const restante = saldoActual - num(f.monto.value);
+    const propina = num(f.propina.value);
+    const restante = saldoActual - num(f.monto.value) - propina;
     $("#r-resumen", dlg).innerHTML =
-      `Saldo resultante: <b class="${restante >= 0 ? "pos" : "neg"}">${money(restante)}</b>` +
+      `Saldo resultante: <b class="${restante >= 0 ? "pos" : "neg"}">${money(restante)}</b>${propina > 0 ? ` <span class="muted">(incluye −${money(propina)} de propina)</span>` : ""}` +
       (restante < 0 ? ` ⚠️ queda negativo` : "");
   };
   if (seleccionable) f.cajera_id.addEventListener("change", refrescar);
   f.monto.addEventListener("input", refrescar);
+  f.propina.addEventListener("input", refrescar);
   refrescar();
 
   f.addEventListener("submit", (e) => {
@@ -2440,7 +2428,8 @@ function abrirTransferir(prefill) {
     const neto = monto - comision + bonoDest;
     const propina = num(f.propina.value);
     const saldoOrigen = origen ? resumenCajera(origen).saldo : 0;
-    const insuf = monto > saldoOrigen;
+    const sale = monto + propina; // lo que baja del saldo del origen (monto + propina)
+    const insuf = sale > saldoOrigen;
     $("#t-resumen", dlg).innerHTML = `
       <div class="rt-row"><span>De <b>${esc(origen ? origen.nombre : "—")}</b></span><b class="neg">−${money(monto)}</b></div>
       ${cobraComision
@@ -2448,9 +2437,9 @@ function abrirTransferir(prefill) {
         : `<div class="rt-row"><span>Comisión</span><b class="muted">sin comisión (cuenta → cajero)</b></div>`}
       ${bonoDest > 0 ? `<div class="rt-row"><span>Bono depósito (${bpDest}%)</span><b class="pos">+${money(bonoDest)}</b></div>` : ""}
       <div class="rt-row"><span>Recibe <b>${esc(destino ? destino.nombre : "—")}</b></span><b class="pos">+${money(neto)}</b></div>
-      ${propina > 0 ? `<div class="rt-row"><span>Propina (se resta del profit)</span><b class="neg">−${money(propina)}</b></div>` : ""}
-      <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - monto >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - monto))}</b></div>
-      ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor al monto.</p>` : ""}`;
+      ${propina > 0 ? `<div class="rt-row"><span>Propina (sale del saldo, resta del profit)</span><b class="neg">−${money(propina)}</b></div>` : ""}
+      <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - sale >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - sale))}</b></div>
+      ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor a monto + propina.</p>` : ""}`;
   };
   // Al cambiar el sentido o el cajero, resetea el bono al default (del casino).
   f.addEventListener("change", (e) => {
@@ -2605,7 +2594,6 @@ function viewConfig() {
   const casas = state.casas.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
     <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap">Bono % <input type="number" inputmode="decimal" step="any" data-bono-casa="${c.id}" value="${num(c.bono_pct)}" style="width:80px" /></label>
-    <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap" title="Mostrar este casino en el filtro del panel de Cajeros"><input type="checkbox" data-filtro-casa="${c.id}" ${c.mostrar_filtro ? "checked" : ""} style="width:auto" /> 🔎 filtro</label>
     <button class="btn-danger btn-sm" data-del-casa="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
   const cajeras = state.cajeras.map((c) => `<div class="cajera-cfg">
@@ -2637,9 +2625,6 @@ function viewConfig() {
         </label>
         <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="casa-gratis" style="width:auto" /> 🎁 Da apuesta gratis
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;color:var(--text);cursor:pointer;white-space:nowrap">
-          <input type="checkbox" id="casa-filtro" style="width:auto" /> 🔎 Mostrar en filtro
         </label>
         <button class="btn-primary" id="add-casa">Agregar casa</button>
       </div>
@@ -2694,16 +2679,10 @@ function bindConfig() {
       bono_pct: num($("#casa-bono").value),
       tiene_cajeras: $("#casa-cajeras").checked,
       permite_gratis: $("#casa-gratis").checked,
-      mostrar_filtro: $("#casa-filtro").checked,
     });
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   });
-  $$("[data-filtro-casa]").forEach((cb) => cb.addEventListener("change", async () => {
-    const { error } = await sb.from("casas").update({ mostrar_filtro: cb.checked }).eq("id", cb.dataset.filtroCasa);
-    if (error) { alert("Error: " + error.message); return; }
-    await cargarTodo(); render();
-  }));
   $("#add-cajera")?.addEventListener("click", async () => {
     const nombre = $("#cajera-nombre").value.trim();
     if (!nombre) return;
