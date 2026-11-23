@@ -623,8 +623,15 @@ dialog[open] { animation: dialog-in .18s ease-out; }
 .bacara-col-body { display: flex; flex-direction: column; gap: 6px; }
 .bacara-fila { display: flex; gap: 4px; align-items: center; }
 .bacara-fila select { flex: 1; min-width: 0; padding: 7px; }
-.bacara-fila input { width: 84px; padding: 7px; }
+.bacara-fila input { width: 78px; padding: 7px; }
 .bacara-fila .btn-danger { padding: 2px 7px; }
+/* Toggle de bono por cajero (🎁 con bono / 🚫 sin bono) */
+.bacara-bono-tg {
+  flex: 0 0 auto; padding: 5px 7px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg-input); font-size: 15px; line-height: 1;
+}
+.bacara-bono-tg.on { border-color: rgba(46,160,67,0.5); box-shadow: 0 0 0 1px rgba(46,160,67,0.25) inset; }
+.bacara-bono-tg.off { opacity: 0.55; filter: grayscale(1); }
 
 @media (max-width: 560px) {
   .bacara-col-head { font-size: 13px; }
