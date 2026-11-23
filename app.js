@@ -1983,7 +1983,7 @@ function cardBacara(p) {
 function bindBacara() {
   $("#nueva-bacara")?.addEventListener("click", () => abrirModalBacara());
   $$("[data-win-bacara]").forEach((b) => b.addEventListener("click", () =>
-    aplicarResolucion(b.dataset.winBacara, b.dataset.lado, { conRetiro: false })));
+    abrirResolverBacara(state.partidosById[b.dataset.winBacara], b.dataset.lado)));
   $$("[data-reopen-bacara]").forEach((b) => b.addEventListener("click", () =>
     aplicarResolucion(b.dataset.reopenBacara, null, { conRetiro: false })));
   $$("[data-del-bacara]").forEach((b) => b.addEventListener("click", () => borrarPartido(b.dataset.delBacara)));
@@ -2083,12 +2083,17 @@ function renderBacaraCols(dlg) {
     </div>`;
   }).join("");
 
-  $$("[data-bf]", cont).forEach((inp) => inp.addEventListener("input", () => {
-    const row = inp.closest(".bacara-fila");
-    bacaraDraft.filas[+row.dataset.i][inp.dataset.bf] = inp.value;
-    if (inp.dataset.bf === "cajera") actualizarResumenBacara(dlg);
-    else actualizarResumenBacara(dlg);
-  }));
+  $$("[data-bf]", cont).forEach((inp) => {
+    const onChange = () => {
+      const row = inp.closest(".bacara-fila");
+      bacaraDraft.filas[+row.dataset.i][inp.dataset.bf] = inp.value;
+      actualizarResumenBacara(dlg);
+    };
+    // 'input' para el monto; 'change' porque en iOS el <select> NO dispara 'input'
+    // (sin esto, el cajero elegido no se guardaba y la apuesta quedaba sin cajero).
+    inp.addEventListener("input", onChange);
+    inp.addEventListener("change", onChange);
+  });
   $$("[data-bono-tg]", cont).forEach((b) => b.addEventListener("click", () => {
     const fila = bacaraDraft.filas[+b.dataset.bonoTg];
     fila.sinBono = !fila.sinBono;
@@ -2216,6 +2221,82 @@ function abrirAgregarBacara(p, lado) {
     await cargarTodo();
     render();
     cerrar();
+  });
+}
+
+// Crédito al saldo de un cajero si se resuelve la apuesta a `res` (premio de las
+// líneas ganadoras cuya casa tiene cajeras — es lo que se acredita al saldo).
+function gananciaSaldoApuesta(a, res) {
+  let g = 0;
+  (a.lineas || []).forEach((l) => {
+    if ((l.resultado || "") === res) {
+      const casa = state.casas.find((x) => x.nombre === l.casa);
+      if (casa && casa.tiene_cajeras) g += calcLinea(l).premio;
+    }
+  });
+  return g;
+}
+
+// Popup de resolver una ronda de Bacará: preview del profit y de cómo queda el
+// saldo de cada cajero (balance) + botón Aceptar. Igual que Resolver de partidos.
+function abrirResolverBacara(p, lado) {
+  if (!p) return;
+  const aps = apuestasDePartido(p.id);
+  let totalProfit = 0, totalBono = 0;
+  const rows = aps.map((a) => {
+    const lan = ladoBacara(a);
+    const c = calcApuesta({ ...a, _partido: { resultado_ganador: lado } });
+    if (c.profit != null) totalProfit += c.profit;
+    const b = bonoDeApuesta(a); totalBono += b;
+    const cajObj = state.cajeras.find((x) => x.nombre === a.cajera);
+    const saldoAct = cajObj ? resumenCajera(cajObj).saldo : 0;
+    const saldoNuevo = saldoAct + gananciaSaldoApuesta(a, lado);
+    const gano = lan === lado;
+    return `<tr>
+      <td>${esc(a.cajera || "—")}</td>
+      <td><b style="color:${BACARA_COLOR[lan] || "inherit"}">${esc(lan)}</b></td>
+      <td class="num">${money(c.ingresado)}</td>
+      <td class="num">${b > 0 ? money(b) : "—"}</td>
+      <td class="num"><span class="badge ${gano ? "Cobrado" : "Perdido"}">${gano ? "Ganó" : "Perdió"}</span></td>
+      <td class="num ${c.profit >= 0 ? "pos" : "neg"}">${money((c.profit || 0) + b)}</td>
+      <td class="num">${money(saldoNuevo)}</td>
+    </tr>`;
+  }).join("");
+  const total = totalProfit + totalBono;
+  const col = BACARA_COLOR[lado] || "var(--accent)";
+
+  const dlg = document.createElement("dialog");
+  dlg.className = "dlg-bacara";
+  dlg.innerHTML = `
+    <form method="dialog" id="form-resolver-bacara">
+      <div class="modal-head">
+        <h2 style="margin:0">Resolver — Ganó <span style="color:${col}">${esc(lado)}</span></h2>
+        <button type="button" class="btn-ghost btn-sm" id="rb-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Cajero</th><th>Lado</th><th class="num">Ingresado</th><th class="num">Bono</th><th class="num">Resultado</th><th class="num">Profit</th><th class="num">Saldo final</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="muted">Sin apuestas</td></tr>`}</tbody>
+        </table></div>
+        <div class="resolver-totales">
+          <div class="rt-row"><span>Profit cuotas</span><b class="${totalProfit >= 0 ? "pos" : "neg"}">${money(totalProfit)}</b></div>
+          ${totalBono > 0 ? `<div class="rt-row"><span>Bono</span><b class="pos">+${money(totalBono)}</b></div>` : ""}
+          <div class="rt-total"><span>Profit total</span><b class="${total >= 0 ? "pos" : "neg"}">${money(total)}</b></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="rb-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">✅ Aceptar — Ganó ${esc(lado)}</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#rb-cerrar", dlg).addEventListener("click", cerrar);
+  $("#rb-cancelar", dlg).addEventListener("click", cerrar);
+  $("#form-resolver-bacara", dlg).addEventListener("submit", (e) => {
+    e.preventDefault();
+    aplicarResolucion(p.id, lado, { conRetiro: false }).then((ok) => { if (ok) cerrar(); });
   });
 }
 
