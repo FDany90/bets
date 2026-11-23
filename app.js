@@ -1824,10 +1824,12 @@ async function resolverPartido(dlg, id) {
 }
 
 // Aplica un resultado a un partido (o lo vuelve a pendiente con res=null).
-// conRetiro=true (partidos normales): maneja el bono por saldo de retiro y el
-// bloqueo "pendiente de retiro". conRetiro=false (Bacará): solo setea el
-// resultado, sin tocar los flags de retiro (las rondas son rápidas).
-async function aplicarResolucion(id, res, { conRetiro = true } = {}) {
+// conRetiro=true (partidos normales): maneja el bono por saldo de retiro y bloquea
+//   "pendiente de retiro" en TODAS las cajeras del partido.
+// conRetiro=false (Bacará): no toca el bono de retiro. Si bloquearGanadores=true,
+//   deja en "pendiente de retiro" solo a los cajeros del LADO GANADOR (los que
+//   tienen saldo para retirar).
+async function aplicarResolucion(id, res, { conRetiro = true, bloquearGanadores = false } = {}) {
   if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
   const p = state.partidosById[id];
   const eraPendiente = !(p && p.resultado_ganador);
@@ -1849,6 +1851,11 @@ async function aplicarResolucion(id, res, { conRetiro = true } = {}) {
       update.bono_retiro = 0; // vuelve a pendiente: se anula el bono de retiro
     }
     // re-resolución (ya estaba finalizado): mantiene el bono_retiro guardado
+  } else if (bloquearGanadores && res) {
+    // Bacará: el cajero del lado ganador queda "pendiente de retiro" (tiene saldo
+    // a la espera de retirar); el perdedor no (no le quedó saldo de esta ronda).
+    const nombresGana = new Set(apuestasDePartido(p.id).filter((a) => ladoBacara(a) === res).map((a) => a.cajera));
+    cajerasABloquear = state.cajeras.filter((c) => nombresGana.has(c.nombre) && !c.pendiente_retiro);
   }
 
   const { error } = await sb.from("partidos").update(update).eq("id", id);
@@ -2283,6 +2290,7 @@ function abrirResolverBacara(p, lado) {
           ${totalBono > 0 ? `<div class="rt-row"><span>Bono</span><b class="pos">+${money(totalBono)}</b></div>` : ""}
           <div class="rt-total"><span>Profit total</span><b class="${total >= 0 ? "pos" : "neg"}">${money(total)}</b></div>
         </div>
+        <p class="muted" style="margin:8px 0 0;font-size:12px">Al aceptar, el/los cajero(s) de <b style="color:${col}">${esc(lado)}</b> quedan en <b style="color:var(--danger)">🔒 Pendiente de retiro</b> hasta que hagas el retiro.</p>
       </div>
       <div class="modal-foot">
         <button type="button" class="btn-ghost" id="rb-cancelar">Cancelar</button>
@@ -2296,7 +2304,7 @@ function abrirResolverBacara(p, lado) {
   $("#rb-cancelar", dlg).addEventListener("click", cerrar);
   $("#form-resolver-bacara", dlg).addEventListener("submit", (e) => {
     e.preventDefault();
-    aplicarResolucion(p.id, lado, { conRetiro: false }).then((ok) => { if (ok) cerrar(); });
+    aplicarResolucion(p.id, lado, { conRetiro: false, bloquearGanadores: true }).then((ok) => { if (ok) cerrar(); });
   });
 }
 
