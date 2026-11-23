@@ -608,7 +608,7 @@ dialog[open] { animation: dialog-in .18s ease-out; }
 
 /* Modal Nueva ronda */
 .dlg-bacara { max-width: 640px; width: 94vw; }
-.bacara-cuotas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.bacara-cuotas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 .bacara-cuotas label { font-size: 12px; }
 .bacara-cols { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .bacara-col {

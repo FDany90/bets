@@ -47,6 +47,7 @@ const state = {
 const BACARA_RESULTADOS = ["Jugador", "Banca"];
 const BACARA_CUOTAS = { Jugador: 2, Banca: 1.95 }; // Jugador 1:1 · Banca 0.95:1
 const BACARA_MONTO = "120000"; // monto por defecto de cada apuesta de bacará (editable)
+const BACARA_BONO = "20"; // % de bono por defecto de cada apuesta de bacará (editable) — el profit del bacará sale del bono
 const BACARA_COLOR = { Jugador: "#2e86ff", Banca: "#e23b3b" };
 const esBacara = (p) => !!(p && p.es_bacara);
 // Lado (Jugador/Banca) al que apostó una apuesta de bacará = resultado de su línea.
@@ -1920,6 +1921,7 @@ function viewBacara() {
 function cardBacara(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
+  const bonoEst = bonoEstimadoPartido(p); // bono por apuesta = el profit del bacará
   const aps = apuestasDePartido(p.id);
   const porLado = { Jugador: [], Banca: [] };
   aps.forEach((a) => { (porLado[ladoBacara(a)] ||= []).push(a); });
@@ -1970,7 +1972,9 @@ function cardBacara(p) {
     <div class="bacara-meta">
       <span>${cp.n} apuesta(s)</span>
       <span>Ingresado: <b>${money(cp.ingresado)}</b></span>
-      ${cp.profitDef ? `<span>Profit: <b class="${cp.profit >= 0 ? "pos" : "neg"}">${money(cp.profit)}</b></span>` : ""}
+      ${cp.profitDef ? `<span>Profit cuotas: <b class="${cp.profit >= 0 ? "pos" : "neg"}">${money(cp.profit)}</b></span>` : ""}
+      ${bonoEst > 0 ? `<span>Bono: <b class="pos">${money(bonoEst)}</b></span>` : ""}
+      ${cp.profitDef ? `<span>Profit total: <b class="${(cp.profit + bonoEst) >= 0 ? "pos" : "neg"}">${money(cp.profit + bonoEst)}</b></span>` : (bonoEst > 0 ? `<span>Profit (est.): <b class="pos">${money(bonoEst)}</b></span>` : "")}
     </div>
     ${resolver}
   </div>`;
@@ -2003,6 +2007,7 @@ function abrirModalBacara() {
   // Arranca con una fila de Jugador y una de Banca (lo más común), monto 100.000.
   bacaraDraft = {
     cuotas: { ...BACARA_CUOTAS },
+    bono: BACARA_BONO, // % de bono aplicado a cada apuesta (el profit del bacará sale de acá)
     filas: [
       { lado: "Jugador", cajera: "", monto: BACARA_MONTO },
       { lado: "Banca", cajera: "", monto: BACARA_MONTO },
@@ -2021,6 +2026,7 @@ function abrirModalBacara() {
         <div class="bacara-cuotas">
           <div><label>Cuota Jugador</label><input type="text" inputmode="decimal" data-cuota="Jugador" value="${BACARA_CUOTAS.Jugador}" /></div>
           <div><label>Cuota Banca</label><input type="text" inputmode="decimal" data-cuota="Banca" value="${BACARA_CUOTAS.Banca}" /></div>
+          <div><label>Bono %</label><input type="text" inputmode="decimal" id="bacara-bono" value="${BACARA_BONO}" /></div>
         </div>
         <div class="bacara-cols" id="bacara-cols"></div>
         <div id="b-resumen" class="muted" style="margin-top:12px"></div>
@@ -2040,6 +2046,10 @@ function abrirModalBacara() {
   $$("[data-cuota]", dlg).forEach((inp) => inp.addEventListener("input", () => {
     bacaraDraft.cuotas[inp.dataset.cuota] = inp.value;
   }));
+  $("#bacara-bono", dlg)?.addEventListener("input", (e) => {
+    bacaraDraft.bono = e.target.value;
+    actualizarResumenBacara(dlg);
+  });
   renderBacaraCols(dlg);
 
   f.addEventListener("submit", (e) => {
@@ -2091,8 +2101,12 @@ function renderBacaraCols(dlg) {
 function actualizarResumenBacara(dlg) {
   const validas = bacaraDraft.filas.filter((fila) => fila.cajera && num(fila.monto) > 0);
   const totalIng = validas.reduce((s, fila) => s + num(fila.monto), 0);
+  const pct = num(bacaraDraft.bono);
+  // bono por apuesta = monto × %/(100+%); el profit del bacará sale de acá.
+  const bonoTotal = pct > 0 ? validas.reduce((s, fila) => s + num(fila.monto) * pct / (100 + pct), 0) : 0;
   const el = $("#b-resumen", dlg);
-  if (el) el.innerHTML = `Se crearán <b>${validas.length}</b> apuesta(s) · Total ingresado: <b>${money(totalIng)}</b>`;
+  if (el) el.innerHTML = `Se crearán <b>${validas.length}</b> apuesta(s) · Total ingresado: <b>${money(totalIng)}</b>`
+    + (bonoTotal > 0 ? ` · Bono (profit): <b class="pos">${money(bonoTotal)}</b>` : "");
 }
 
 async function guardarBacara(dlg) {
@@ -2115,7 +2129,7 @@ async function guardarBacara(dlg) {
 
   try {
     for (const fila of validas) {
-      await insertarApuestaBacara(data.id, fila.lado, fila.cajera, fila.monto, bacaraDraft.cuotas[fila.lado]);
+      await insertarApuestaBacara(data.id, fila.lado, fila.cajera, fila.monto, bacaraDraft.cuotas[fila.lado], bacaraDraft.bono);
     }
   } catch (e) { alert("Error guardando apuestas: " + (e.message || e)); return false; }
 
@@ -2125,11 +2139,11 @@ async function guardarBacara(dlg) {
 }
 
 // Inserta una apuesta de bacará (1 apuesta + 1 línea) para un cajero y lado.
-async function insertarApuestaBacara(partidoId, lado, cajera, monto, cuota) {
+async function insertarApuestaBacara(partidoId, lado, cajera, monto, cuota, bonoPct) {
   const caj = state.cajeras.find((x) => x.nombre === cajera);
   const casa = casaDeCajera(caj);
   const { data, error } = await sb.from("apuestas")
-    .insert({ partido_id: partidoId, cajera, premio_cobrado: null, notas: null, bono_pct: 0 })
+    .insert({ partido_id: partidoId, cajera, premio_cobrado: null, notas: null, bono_pct: num(bonoPct) })
     .select("id").single();
   if (error) throw error;
   const { error: e2 } = await sb.from("lineas").insert({
@@ -2164,6 +2178,7 @@ function abrirAgregarBacara(p, lado) {
           <div><label>Cajero</label><select name="cajera"><option value="">— elegir —</option>${opts}</select></div>
           <div><label>Monto</label><input type="text" inputmode="decimal" name="monto" value="${BACARA_MONTO}" required autofocus /></div>
           <div><label>Cuota</label><input type="text" inputmode="decimal" name="cuota" value="${cuotaDef}" /></div>
+          <div><label>Bono %</label><input type="text" inputmode="decimal" name="bono" value="${BACARA_BONO}" /></div>
         </div>
       </div>
       <div class="modal-foot">
@@ -2185,7 +2200,7 @@ function abrirAgregarBacara(p, lado) {
     if (!cajera) { alert("Elegí un cajero."); return; }
     if (!(num(f.monto.value) > 0)) { alert("Ingresá un monto."); return; }
     try {
-      await insertarApuestaBacara(p.id, lado, cajera, f.monto.value, f.cuota.value || BACARA_CUOTAS[lado]);
+      await insertarApuestaBacara(p.id, lado, cajera, f.monto.value, f.cuota.value || BACARA_CUOTAS[lado], f.bono.value);
     } catch (err) { alert("Error: " + (err.message || err)); return; }
     await cargarTodo();
     render();
