@@ -16,7 +16,7 @@ if (CONFIGURADO) {
 // ---------- Estado en memoria ----------
 const PAGE_SIZE = 10;
 const state = {
-  tab: "partidos",
+  tab: "bacara",
   casas: [],          // {id, nombre, bono_pct, tiene_cajeras, permite_gratis}
   casasById: {},      // id -> casa
   admins: [],         // {id, nombre} — dueños de cajeros/cuentas (para agrupar/filtrar)
