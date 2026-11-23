@@ -44,11 +44,11 @@ const state = {
 // ---------- Bacará (baccarat) ----------
 // Una ronda de Bacará es un partido con es_bacara=true. Resultados fijos y cuotas
 // por defecto (editables por ronda). Cada cajero que apuesta = 1 apuesta/1 línea.
-const BACARA_RESULTADOS = ["Jugador", "Banca", "Empate"];
-const BACARA_CUOTAS = { Jugador: 2, Banca: 1.95, Empate: 9 }; // Jugador 1:1 · Banca 0.95:1 · Empate 8:1
-const BACARA_COLOR = { Jugador: "#2e86ff", Banca: "#e23b3b", Empate: "#1ea361" };
+const BACARA_RESULTADOS = ["Jugador", "Banca"];
+const BACARA_CUOTAS = { Jugador: 2, Banca: 1.95 }; // Jugador 1:1 · Banca 0.95:1
+const BACARA_COLOR = { Jugador: "#2e86ff", Banca: "#e23b3b" };
 const esBacara = (p) => !!(p && p.es_bacara);
-// Lado (Jugador/Banca/Empate) al que apostó una apuesta de bacará = resultado de su línea.
+// Lado (Jugador/Banca) al que apostó una apuesta de bacará = resultado de su línea.
 const ladoBacara = (a) => { const l = (a.lineas || [])[0]; return l ? (l.resultado || "") : ""; };
 
 // Admin (dueño) de una cajera/cuenta, o null.
@@ -1870,7 +1870,7 @@ async function aplicarResolucion(id, res, { conRetiro = true } = {}) {
 }
 
 // ============================================================
-//   VISTA: BACARÁ (baccarat) — mesa rápida Jugador / Banca / Empate
+//   VISTA: BACARÁ (baccarat) — mesa rápida Jugador / Banca
 // ============================================================
 function viewBacara() {
   const rondas = state.partidos.filter(esBacara);
@@ -1920,7 +1920,7 @@ function cardBacara(p) {
   const est = estadoPartido(p);
   const cp = calcPartido(p);
   const aps = apuestasDePartido(p.id);
-  const porLado = { Jugador: [], Banca: [], Empate: [] };
+  const porLado = { Jugador: [], Banca: [] };
   aps.forEach((a) => { (porLado[ladoBacara(a)] ||= []).push(a); });
   const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
 
@@ -1950,7 +1950,6 @@ function cardBacara(p) {
   const resolver = est === "Pendiente"
     ? `<div class="bacara-resolver">
         <button class="bacara-win lado-jugador" data-win-bacara="${p.id}" data-lado="Jugador" ${cp.n ? "" : "disabled"}>Ganó Jugador</button>
-        <button class="bacara-win lado-empate" data-win-bacara="${p.id}" data-lado="Empate" ${cp.n ? "" : "disabled"}>Empate</button>
         <button class="bacara-win lado-banca" data-win-bacara="${p.id}" data-lado="Banca" ${cp.n ? "" : "disabled"}>Ganó Banca</button>
       </div>`
     : `<div class="bacara-resolver resuelto">
@@ -1966,7 +1965,7 @@ function cardBacara(p) {
       <div class="spacer"></div>
       <button class="btn-danger btn-sm" data-del-bacara="${p.id}" title="Eliminar ronda">🗑️</button>
     </div>
-    <div class="bacara-lados">${bloque("Jugador")}${bloque("Empate")}${bloque("Banca")}</div>
+    <div class="bacara-lados">${bloque("Jugador")}${bloque("Banca")}</div>
     <div class="bacara-meta">
       <span>${cp.n} apuesta(s)</span>
       <span>Ingresado: <b>${money(cp.ingresado)}</b></span>
@@ -2020,7 +2019,6 @@ function abrirModalBacara() {
       <div class="modal-body">
         <div class="bacara-cuotas">
           <div><label>Cuota Jugador</label><input type="text" inputmode="decimal" data-cuota="Jugador" value="${BACARA_CUOTAS.Jugador}" /></div>
-          <div><label>Cuota Empate</label><input type="text" inputmode="decimal" data-cuota="Empate" value="${BACARA_CUOTAS.Empate}" /></div>
           <div><label>Cuota Banca</label><input type="text" inputmode="decimal" data-cuota="Banca" value="${BACARA_CUOTAS.Banca}" /></div>
         </div>
         <div class="bacara-cols" id="bacara-cols"></div>
