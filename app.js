@@ -2468,8 +2468,10 @@ function bindCajeras() {
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
-  // Botón global: siempre arranca en Cuenta → Cajero (es el flujo más común).
-  $("#transferir")?.addEventListener("click", () => abrirTransferir({ dir: "cuenta_a_cajero" }));
+  // Botón global: el sentido depende del sub-tab (Cajeros → Cajero→Cuenta; Cuentas → Cuenta→Cajero).
+  $("#transferir")?.addEventListener("click", () => abrirTransferir({
+    dir: state.cajerasTab === "cuenta" ? "cuenta_a_cajero" : "cajero_a_cuenta",
+  }));
   $("#ver-transf")?.addEventListener("click", () => abrirTransferencias());
   $$("[data-ganancia]").forEach((b) => b.addEventListener("click", () => abrirGanancia(byId(b.dataset.ganancia))));
   $$("[data-cargar]").forEach((b) => b.addEventListener("click", () => abrirCargar(byId(b.dataset.cargar))));
@@ -2477,8 +2479,8 @@ function bindCajeras() {
   // Transferir desde una cuenta: sentido Cuenta → Cajero, cuenta preseleccionada
   // (y el selector de cajero se filtra a los cajeros de esa cuenta).
   $$("[data-transf]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cuentaId: b.dataset.transf, dir: "cuenta_a_cajero" })));
-  // Transferir desde un cajero: sentido Cuenta → Cajero, cajero preseleccionado.
-  $$("[data-transf-cajero]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cajeroId: b.dataset.transfCajero, dir: "cuenta_a_cajero" })));
+  // Transferir desde un cajero: sentido Cajero → Cuenta, cajero preseleccionado (origen).
+  $$("[data-transf-cajero]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cajeroId: b.dataset.transfCajero, dir: "cajero_a_cuenta" })));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
   $$("[data-retiro-toggle]").forEach((cb) => cb.addEventListener("change", () => toggleSaldoRetiro(cb.dataset.retiroToggle, cb.checked)));
   $$("[data-pendiente-toggle]").forEach((cb) => cb.addEventListener("change", () => togglePendienteRetiro(cb.dataset.pendienteToggle, cb.checked)));
