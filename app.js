@@ -37,7 +37,19 @@ const state = {
   cajerasTab: "cajero", // "cajero" | "cuenta" — sub-tab del panel de Cajeras
   cajerasOrden: "actividad", // "actividad" | "saldo" — orden de las cards de cajeras
   filtroAdmin: "",    // "" = todos · "none" = sin admin · <id> = ese admin
+  bacaraEstado: "Pendiente", // filtro de la sección Bacará ("" | "Pendiente" | "Finalizado")
+  bacaraPagina: 1,    // paginado de las rondas de Bacará
 };
+
+// ---------- Bacará (baccarat) ----------
+// Una ronda de Bacará es un partido con es_bacara=true. Resultados fijos y cuotas
+// por defecto (editables por ronda). Cada cajero que apuesta = 1 apuesta/1 línea.
+const BACARA_RESULTADOS = ["Jugador", "Banca", "Empate"];
+const BACARA_CUOTAS = { Jugador: 2, Banca: 1.95, Empate: 9 }; // Jugador 1:1 · Banca 0.95:1 · Empate 8:1
+const BACARA_COLOR = { Jugador: "#2e86ff", Banca: "#e23b3b", Empate: "#1ea361" };
+const esBacara = (p) => !!(p && p.es_bacara);
+// Lado (Jugador/Banca/Empate) al que apostó una apuesta de bacará = resultado de su línea.
+const ladoBacara = (a) => { const l = (a.lineas || [])[0]; return l ? (l.resultado || "") : ""; };
 
 // Admin (dueño) de una cajera/cuenta, o null.
 const adminDeCajera = (c) => (c && c.admin_id ? state.adminsById[c.admin_id] : null);
@@ -690,6 +702,7 @@ function render() {
   const v = $("#view");
   if (state.tab === "reportes") { v.innerHTML = viewReportes(); bindReportes(); }
   else if (state.tab === "partidos") { v.innerHTML = viewPartidos(); bindPartidos(); }
+  else if (state.tab === "bacara") { v.innerHTML = viewBacara(); bindBacara(); }
   else if (state.tab === "cajeras") { v.innerHTML = viewCajeras(); bindCajeras(); }
   else if (state.tab === "config") { v.innerHTML = viewConfig(); bindConfig(); }
   // Re-dispara el fade del contenido (cambio de tab/página/datos)
@@ -1015,16 +1028,18 @@ function abrirRetirosGanancia() {
 //   VISTA: PARTIDOS (con apuestas anidadas)
 // ============================================================
 function viewPartidos() {
-  // conteo por estado de partido para los chips
-  const cont = { "": state.partidos.length, Pendiente: 0, Finalizado: 0 };
-  state.partidos.forEach((p) => { cont[estadoPartido(p)]++; });
+  // conteo por estado de partido para los chips (sin las rondas de Bacará)
+  const cont = { "": 0, Pendiente: 0, Finalizado: 0 };
+  state.partidos.filter((p) => !esBacara(p)).forEach((p) => { cont[""]++; cont[estadoPartido(p)]++; });
 
   // Pendientes: fecha/hora ascendente (el próximo primero).
   // Finalizados: descendente (el más reciente primero).
   // "Todos": pendientes arriba (ascendente) y finalizados abajo (descendente).
+  // Las rondas de Bacará viven en su propia sección (no en Partidos).
+  const soloPartidos = state.partidos.filter((p) => !esBacara(p));
   const filtrados = state.filtroEstado
-    ? state.partidos.filter((p) => estadoPartido(p) === state.filtroEstado)
-    : state.partidos;
+    ? soloPartidos.filter((p) => estadoPartido(p) === state.filtroEstado)
+    : soloPartidos;
   const lista = ordenarPartidosPorEstado(filtrados);
 
   const total = lista.length;
@@ -1801,28 +1816,38 @@ function abrirResolverPartido(p) {
 }
 
 async function resolverPartido(dlg, id) {
-  if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
   const f = $("#form-resolver", dlg);
-  const p = state.partidosById[id];
   const res = f.resultado_ganador.value || null;
+  return aplicarResolucion(id, res, { conRetiro: true });
+}
+
+// Aplica un resultado a un partido (o lo vuelve a pendiente con res=null).
+// conRetiro=true (partidos normales): maneja el bono por saldo de retiro y el
+// bloqueo "pendiente de retiro". conRetiro=false (Bacará): solo setea el
+// resultado, sin tocar los flags de retiro (las rondas son rápidas).
+async function aplicarResolucion(id, res, { conRetiro = true } = {}) {
+  if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
+  const p = state.partidosById[id];
   const eraPendiente = !(p && p.resultado_ganador);
 
   const update = { resultado_ganador: res };
   let cajerasConsumidas = [];
   let cajerasABloquear = [];
-  if (res && eraPendiente) {
-    // Primera resolución: snapshot del bono (saldos del momento) y se "consume"
-    // el saldo de retiro de esas cajeras → se desactiva el check para no contarlo
-    // de nuevo si la misma cajera está en otro partido sin resolver.
-    update.bono_retiro = bonoRetiroPartido(p);
-    cajerasConsumidas = cajerasConRetiroDePartido(p);
-    // Todas las cajeras del partido quedan "pendientes de retiro" (rojas):
-    // tienen saldo a la espera de retirar y no se deben tocar.
-    cajerasABloquear = cajerasDePartido(p).filter((c) => !c.pendiente_retiro);
-  } else if (!res) {
-    update.bono_retiro = 0; // vuelve a pendiente: se anula el bono de retiro
+  if (conRetiro) {
+    if (res && eraPendiente) {
+      // Primera resolución: snapshot del bono (saldos del momento) y se "consume"
+      // el saldo de retiro de esas cajeras → se desactiva el check para no contarlo
+      // de nuevo si la misma cajera está en otro partido sin resolver.
+      update.bono_retiro = bonoRetiroPartido(p);
+      cajerasConsumidas = cajerasConRetiroDePartido(p);
+      // Todas las cajeras del partido quedan "pendientes de retiro" (rojas):
+      // tienen saldo a la espera de retirar y no se deben tocar.
+      cajerasABloquear = cajerasDePartido(p).filter((c) => !c.pendiente_retiro);
+    } else if (!res) {
+      update.bono_retiro = 0; // vuelve a pendiente: se anula el bono de retiro
+    }
+    // re-resolución (ya estaba finalizado): mantiene el bono_retiro guardado
   }
-  // re-resolución (ya estaba finalizado): mantiene el bono_retiro guardado
 
   const { error } = await sb.from("partidos").update(update).eq("id", id);
   if (error) { alert("Error: " + error.message); return false; }
@@ -1842,6 +1867,331 @@ async function resolverPartido(dlg, id) {
   await cargarTodo();
   render();
   return true;
+}
+
+// ============================================================
+//   VISTA: BACARÁ (baccarat) — mesa rápida Jugador / Banca / Empate
+// ============================================================
+function viewBacara() {
+  const rondas = state.partidos.filter(esBacara);
+  const cont = { "": rondas.length, Pendiente: 0, Finalizado: 0 };
+  rondas.forEach((p) => { cont[estadoPartido(p)]++; });
+
+  const filtradas = state.bacaraEstado
+    ? rondas.filter((p) => estadoPartido(p) === state.bacaraEstado)
+    : rondas;
+  const lista = ordenarPartidosPorEstado(filtradas);
+
+  const total = lista.length;
+  const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (state.bacaraPagina > paginas) state.bacaraPagina = paginas;
+  if (state.bacaraPagina < 1) state.bacaraPagina = 1;
+  const inicio = (state.bacaraPagina - 1) * PAGE_SIZE;
+  const visibles = lista.slice(inicio, inicio + PAGE_SIZE);
+
+  const chips = [["", "Todas"], ["Pendiente", "Pendientes"], ["Finalizado", "Finalizadas"]]
+    .map(([v, t]) => `<button class="chip-f ${state.bacaraEstado === v ? "active" : ""}" data-bestado="${v}">${t} <span class="chip-n">${cont[v] || 0}</span></button>`)
+    .join("");
+
+  const cards = visibles.map(cardBacara).join("");
+  const desde = total ? inicio + 1 : 0;
+  const hasta = Math.min(inicio + PAGE_SIZE, total);
+  const pager = paginas > 1 ? `
+    <div class="toolbar" style="justify-content:center; margin-top:14px; margin-bottom:0">
+      <button class="btn-ghost btn-sm" id="b-prev" ${state.bacaraPagina <= 1 ? "disabled" : ""}>‹ Anterior</button>
+      <span class="muted">Página ${state.bacaraPagina} de ${paginas}</span>
+      <button class="btn-ghost btn-sm" id="b-next" ${state.bacaraPagina >= paginas ? "disabled" : ""}>Siguiente ›</button>
+    </div>` : "";
+
+  return `
+    <div class="toolbar">
+      <button class="btn-primary" id="nueva-bacara">+ Nueva ronda</button>
+      <div class="spacer"></div>
+      <span class="muted">${total ? `${desde}–${hasta} de ${total}` : "0"} ronda(s)</span>
+    </div>
+    <div class="chips-filtro">${chips}</div>
+    ${cards || `<div class="card"><p class="muted">Sin rondas todavía. Creá la primera con “+ Nueva ronda”.</p></div>`}
+    ${pager}
+  `;
+}
+
+// Tarjeta compacta de una ronda de Bacará (3 lados coloreados)
+function cardBacara(p) {
+  const est = estadoPartido(p);
+  const cp = calcPartido(p);
+  const aps = apuestasDePartido(p.id);
+  const porLado = { Jugador: [], Banca: [], Empate: [] };
+  aps.forEach((a) => { (porLado[ladoBacara(a)] ||= []).push(a); });
+  const fechaTxt = [p.fecha || "", p.hora ? fmtHora(p.hora) : ""].filter(Boolean).join(" · ");
+
+  const bloque = (lado) => {
+    const list = porLado[lado] || [];
+    const totalIng = list.reduce((s, a) => s + calcApuesta(a).ingresado, 0);
+    const ganador = est === "Finalizado" && p.resultado_ganador === lado;
+    const rows = list.map((a) => {
+      const c = calcApuesta(a);
+      const pf = est === "Finalizado" && c.profit != null
+        ? `<span class="bacara-pf ${c.profit >= 0 ? "pos" : "neg"}">${money(c.profit)}</span>` : "";
+      return `<div class="bacara-bet">
+        <span class="bacara-caj">${esc(a.cajera || "—")}</span>
+        <span class="bacara-monto">${money(c.ingresado)}</span>
+        ${pf}
+        <button class="btn-danger btn-sm bacara-del" data-del="${a.id}" title="Eliminar apuesta">✕</button>
+      </div>`;
+    }).join("");
+    return `<div class="bacara-lado lado-${lado.toLowerCase()} ${ganador ? "ganador" : ""}">
+      <div class="bacara-lado-head"><span>${lado}</span><span class="bacara-cuota">${BACARA_CUOTAS[lado]}</span></div>
+      <div class="bacara-bets">${rows || `<div class="bacara-empty">—</div>`}</div>
+      <div class="bacara-lado-tot">${list.length ? `Σ ${money(totalIng)}` : ""}</div>
+      ${est === "Pendiente" ? `<button class="btn-ghost btn-sm bacara-add" data-add-bacara="${p.id}" data-lado="${lado}">+ cajero</button>` : ""}
+    </div>`;
+  };
+
+  const resolver = est === "Pendiente"
+    ? `<div class="bacara-resolver">
+        <button class="bacara-win lado-jugador" data-win-bacara="${p.id}" data-lado="Jugador" ${cp.n ? "" : "disabled"}>Ganó Jugador</button>
+        <button class="bacara-win lado-empate" data-win-bacara="${p.id}" data-lado="Empate" ${cp.n ? "" : "disabled"}>Empate</button>
+        <button class="bacara-win lado-banca" data-win-bacara="${p.id}" data-lado="Banca" ${cp.n ? "" : "disabled"}>Ganó Banca</button>
+      </div>`
+    : `<div class="bacara-resolver resuelto">
+        <span class="muted">Ganó <b style="color:${BACARA_COLOR[p.resultado_ganador] || "inherit"}">${esc(p.resultado_ganador)}</b></span>
+        <button class="btn-ghost btn-sm" data-reopen-bacara="${p.id}">↩️ Cambiar</button>
+      </div>`;
+
+  return `<div class="card bacara estado-${est}">
+    <div class="bacara-head">
+      <h2>${esc(p.nombre)}</h2>
+      ${fechaTxt ? `<span class="muted">${esc(fechaTxt)}</span>` : ""}
+      <span class="badge ${est}">${est}</span>
+      <div class="spacer"></div>
+      <button class="btn-danger btn-sm" data-del-bacara="${p.id}" title="Eliminar ronda">🗑️</button>
+    </div>
+    <div class="bacara-lados">${bloque("Jugador")}${bloque("Empate")}${bloque("Banca")}</div>
+    <div class="bacara-meta">
+      <span>${cp.n} apuesta(s)</span>
+      <span>Ingresado: <b>${money(cp.ingresado)}</b></span>
+      ${cp.profitDef ? `<span>Profit: <b class="${cp.profit >= 0 ? "pos" : "neg"}">${money(cp.profit)}</b></span>` : ""}
+    </div>
+    ${resolver}
+  </div>`;
+}
+
+function bindBacara() {
+  $("#nueva-bacara")?.addEventListener("click", () => abrirModalBacara());
+  $$("[data-win-bacara]").forEach((b) => b.addEventListener("click", () =>
+    aplicarResolucion(b.dataset.winBacara, b.dataset.lado, { conRetiro: false })));
+  $$("[data-reopen-bacara]").forEach((b) => b.addEventListener("click", () =>
+    aplicarResolucion(b.dataset.reopenBacara, null, { conRetiro: false })));
+  $$("[data-del-bacara]").forEach((b) => b.addEventListener("click", () => borrarPartido(b.dataset.delBacara)));
+  $$("[data-add-bacara]").forEach((b) => b.addEventListener("click", () =>
+    abrirAgregarBacara(state.partidosById[b.dataset.addBacara], b.dataset.lado)));
+  $$("[data-del]").forEach((b) => b.addEventListener("click", () => borrarApuesta(b.dataset.del)));
+  $("#b-prev")?.addEventListener("click", () => { state.bacaraPagina--; render(); });
+  $("#b-next")?.addEventListener("click", () => { state.bacaraPagina++; render(); });
+  $$("[data-bestado]").forEach((b) => b.addEventListener("click", () => {
+    state.bacaraEstado = b.dataset.bestado; state.bacaraPagina = 1; render();
+  }));
+}
+
+// Working draft del modal Nueva ronda
+let bacaraDraft = { cuotas: { ...BACARA_CUOTAS }, filas: [] };
+
+function abrirModalBacara() {
+  if (!state.cajeras.filter((x) => !esCuenta(x) && esActivo(x)).length) {
+    alert("No hay cajeros activos. Agregá uno en Configuración."); return;
+  }
+  // Arranca con una fila de Jugador y una de Banca (lo más común), monto 100.000.
+  bacaraDraft = {
+    cuotas: { ...BACARA_CUOTAS },
+    filas: [
+      { lado: "Jugador", cajera: "", monto: "100000" },
+      { lado: "Banca", cajera: "", monto: "100000" },
+    ],
+  };
+
+  const dlg = document.createElement("dialog");
+  dlg.className = "dlg-bacara";
+  dlg.innerHTML = `
+    <form method="dialog" id="form-bacara">
+      <div class="modal-head">
+        <h2 style="margin:0">🎴 Nueva ronda de Bacará</h2>
+        <button type="button" class="btn-ghost btn-sm" id="b-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="bacara-cuotas">
+          <div><label>Cuota Jugador</label><input type="text" inputmode="decimal" data-cuota="Jugador" value="${BACARA_CUOTAS.Jugador}" /></div>
+          <div><label>Cuota Empate</label><input type="text" inputmode="decimal" data-cuota="Empate" value="${BACARA_CUOTAS.Empate}" /></div>
+          <div><label>Cuota Banca</label><input type="text" inputmode="decimal" data-cuota="Banca" value="${BACARA_CUOTAS.Banca}" /></div>
+        </div>
+        <div class="bacara-cols" id="bacara-cols"></div>
+        <div id="b-resumen" class="muted" style="margin-top:12px"></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="b-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Crear ronda</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  const f = $("#form-bacara", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#b-cerrar", dlg).addEventListener("click", cerrar);
+  $("#b-cancelar", dlg).addEventListener("click", cerrar);
+  $$("[data-cuota]", dlg).forEach((inp) => inp.addEventListener("input", () => {
+    bacaraDraft.cuotas[inp.dataset.cuota] = inp.value;
+  }));
+  renderBacaraCols(dlg);
+
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    guardarBacara(dlg).then((ok) => { if (ok) cerrar(); });
+  });
+}
+
+function renderBacaraCols(dlg) {
+  const cajerosActivos = state.cajeras.filter((x) => !esCuenta(x) && esActivo(x));
+  const cont = $("#bacara-cols", dlg);
+  cont.innerHTML = BACARA_RESULTADOS.map((lado) => {
+    const filasLado = bacaraDraft.filas
+      .map((fila, i) => ({ fila, i }))
+      .filter((o) => o.fila.lado === lado);
+    const rows = filasLado.map(({ fila, i }) => {
+      const opts = cajerosActivos.map((x) =>
+        `<option value="${esc(x.nombre)}" ${x.nombre === fila.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+      return `<div class="bacara-fila" data-i="${i}">
+        <select data-bf="cajera"><option value="">— cajero —</option>${opts}</select>
+        <input type="text" inputmode="decimal" data-bf="monto" value="${fila.monto}" placeholder="100000" />
+        <button type="button" class="btn-danger btn-sm" data-brm="${i}" title="Quitar">✕</button>
+      </div>`;
+    }).join("");
+    return `<div class="bacara-col lado-${lado.toLowerCase()}">
+      <div class="bacara-col-head">${lado} <span class="bacara-cuota">${bacaraDraft.cuotas[lado]}</span></div>
+      <div class="bacara-col-body">${rows || `<div class="bacara-empty">sin cajeros</div>`}</div>
+      <button type="button" class="btn-ghost btn-sm bacara-add" data-badd="${lado}">+ cajero</button>
+    </div>`;
+  }).join("");
+
+  $$("[data-bf]", cont).forEach((inp) => inp.addEventListener("input", () => {
+    const row = inp.closest(".bacara-fila");
+    bacaraDraft.filas[+row.dataset.i][inp.dataset.bf] = inp.value;
+    if (inp.dataset.bf === "cajera") actualizarResumenBacara(dlg);
+    else actualizarResumenBacara(dlg);
+  }));
+  $$("[data-brm]", cont).forEach((b) => b.addEventListener("click", () => {
+    bacaraDraft.filas.splice(+b.dataset.brm, 1);
+    renderBacaraCols(dlg);
+  }));
+  $$("[data-badd]", cont).forEach((b) => b.addEventListener("click", () => {
+    bacaraDraft.filas.push({ lado: b.dataset.badd, cajera: "", monto: "100000" });
+    renderBacaraCols(dlg);
+  }));
+  actualizarResumenBacara(dlg);
+}
+
+function actualizarResumenBacara(dlg) {
+  const validas = bacaraDraft.filas.filter((fila) => fila.cajera && num(fila.monto) > 0);
+  const totalIng = validas.reduce((s, fila) => s + num(fila.monto), 0);
+  const el = $("#b-resumen", dlg);
+  if (el) el.innerHTML = `Se crearán <b>${validas.length}</b> apuesta(s) · Total ingresado: <b>${money(totalIng)}</b>`;
+}
+
+async function guardarBacara(dlg) {
+  if (!sb) { alert("Primero configurá Supabase en config.js"); return false; }
+  const validas = bacaraDraft.filas.filter((fila) => fila.cajera && num(fila.monto) > 0);
+  if (!validas.length) { alert("Agregá al menos un cajero con monto en algún lado."); return false; }
+
+  const n = state.partidos.filter(esBacara).length + 1;
+  const ahora = new Date();
+  const payload = {
+    nombre: `Bacará #${n}`,
+    fecha: ahora.toISOString().slice(0, 10),
+    hora: ahora.toTimeString().slice(0, 5),
+    resultado_ganador: null,
+    resultados: BACARA_RESULTADOS,
+    es_bacara: true,
+  };
+  const { data, error } = await sb.from("partidos").insert(payload).select("id").single();
+  if (error) { alert("Error creando la ronda: " + error.message); return false; }
+
+  try {
+    for (const fila of validas) {
+      await insertarApuestaBacara(data.id, fila.lado, fila.cajera, fila.monto, bacaraDraft.cuotas[fila.lado]);
+    }
+  } catch (e) { alert("Error guardando apuestas: " + (e.message || e)); return false; }
+
+  await cargarTodo();
+  render();
+  return true;
+}
+
+// Inserta una apuesta de bacará (1 apuesta + 1 línea) para un cajero y lado.
+async function insertarApuestaBacara(partidoId, lado, cajera, monto, cuota) {
+  const caj = state.cajeras.find((x) => x.nombre === cajera);
+  const casa = casaDeCajera(caj);
+  const { data, error } = await sb.from("apuestas")
+    .insert({ partido_id: partidoId, cajera, premio_cobrado: null, notas: null, bono_pct: 0 })
+    .select("id").single();
+  if (error) throw error;
+  const { error: e2 } = await sb.from("lineas").insert({
+    apuesta_id: data.id,
+    casa: casa ? casa.nombre : "",
+    monto_cargado: num(monto),
+    bono_pct: 0,
+    cuota: num(cuota),
+    resultado: lado,
+    apuesta_gratis: 0,
+    orden: 0,
+  });
+  if (e2) throw e2;
+}
+
+// Modal chico: agregar un cajero a un lado de una ronda ya creada
+function abrirAgregarBacara(p, lado) {
+  if (!p) return;
+  const cajerosActivos = state.cajeras.filter((x) => !esCuenta(x) && esActivo(x));
+  const opts = cajerosActivos.map((x) => `<option value="${esc(x.nombre)}">${esc(x.nombre)}</option>`).join("");
+  const cuotaDef = BACARA_CUOTAS[lado] ?? "";
+
+  const dlg = document.createElement("dialog");
+  dlg.innerHTML = `
+    <form method="dialog" id="form-add-bacara">
+      <div class="modal-head">
+        <h2 style="margin:0">+ ${esc(lado)} — ${esc(p.nombre)}</h2>
+        <button type="button" class="btn-ghost btn-sm" id="ab-cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid grid-2">
+          <div><label>Cajero</label><select name="cajera"><option value="">— elegir —</option>${opts}</select></div>
+          <div><label>Monto</label><input type="text" inputmode="decimal" name="monto" value="100000" required autofocus /></div>
+          <div><label>Cuota</label><input type="text" inputmode="decimal" name="cuota" value="${cuotaDef}" /></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" id="ab-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary">Agregar</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const f = $("#form-add-bacara", dlg);
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  $("#ab-cerrar", dlg).addEventListener("click", cerrar);
+  $("#ab-cancelar", dlg).addEventListener("click", cerrar);
+  f.monto.select?.();
+
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const cajera = f.cajera.value;
+    if (!cajera) { alert("Elegí un cajero."); return; }
+    if (!(num(f.monto.value) > 0)) { alert("Ingresá un monto."); return; }
+    try {
+      await insertarApuestaBacara(p.id, lado, cajera, f.monto.value, f.cuota.value || BACARA_CUOTAS[lado]);
+    } catch (err) { alert("Error: " + (err.message || err)); return; }
+    await cargarTodo();
+    render();
+    cerrar();
+  });
 }
 
 // ============================================================

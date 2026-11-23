@@ -553,3 +553,81 @@ dialog[open] { animation: dialog-in .18s ease-out; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================
+   BACARÁ (baccarat)
+   ============================================================ */
+.card.bacara { padding: 14px; }
+.bacara-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.bacara-head h2 { margin: 0; font-size: 18px; }
+.bacara-head .spacer { flex: 1; }
+
+/* 3 columnas de lados */
+.bacara-lados { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.bacara-lado {
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--lado, var(--border-strong));
+  border-radius: var(--radius-sm);
+  background: var(--lado-bg, rgba(255,255,255,0.02));
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.bacara-lado.lado-jugador { --lado: #2e86ff; --lado-bg: rgba(46,134,255,0.08); }
+.bacara-lado.lado-banca   { --lado: #e23b3b; --lado-bg: rgba(226,59,59,0.08); }
+.bacara-lado.lado-empate  { --lado: #1ea361; --lado-bg: rgba(30,163,97,0.08); }
+.bacara-lado.ganador { box-shadow: 0 0 0 2px var(--lado) inset; }
+.bacara-lado-head { display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; color: var(--lado); font-size: 14px; }
+.bacara-cuota { font-size: 12px; font-weight: 700; opacity: 0.85; }
+.bacara-bets { display: flex; flex-direction: column; gap: 4px; }
+.bacara-bet { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.bacara-bet .bacara-caj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bacara-bet .bacara-monto { font-variant-numeric: tabular-nums; opacity: 0.9; }
+.bacara-bet .bacara-pf { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
+.bacara-bet .bacara-del { padding: 1px 6px; line-height: 1.4; }
+.bacara-empty { color: var(--text-dim); font-size: 12px; text-align: center; padding: 6px 0; }
+.bacara-lado-tot { font-size: 12px; color: var(--text-dim); text-align: right; font-variant-numeric: tabular-nums; min-height: 14px; }
+.bacara-lado .bacara-add { align-self: stretch; text-align: center; }
+
+.bacara-meta { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; font-size: 13px; color: var(--text-dim); }
+.bacara-meta b { color: var(--text); }
+
+/* Botones de resolver (un toque = lado ganador) */
+.bacara-resolver { display: flex; gap: 8px; align-items: center; }
+.bacara-resolver.resuelto { justify-content: space-between; }
+.bacara-win {
+  flex: 1; padding: 12px 8px; border: none; border-radius: var(--radius-sm);
+  color: #fff; font-weight: 800; font-size: 15px; cursor: pointer;
+  box-shadow: var(--shadow-sm); transition: filter .12s, transform .05s;
+}
+.bacara-win:active { transform: scale(0.97); }
+.bacara-win:hover { filter: brightness(1.1); }
+.bacara-win:disabled { opacity: 0.4; cursor: not-allowed; }
+.bacara-win.lado-jugador { background: #2e86ff; }
+.bacara-win.lado-banca   { background: #e23b3b; }
+.bacara-win.lado-empate  { background: #1ea361; flex: 0.7; }
+
+/* Modal Nueva ronda */
+.dlg-bacara { max-width: 640px; width: 94vw; }
+.bacara-cuotas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.bacara-cuotas label { font-size: 12px; }
+.bacara-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.bacara-col {
+  border: 1px solid var(--border); border-top: 3px solid var(--lado, var(--border-strong));
+  border-radius: var(--radius-sm); padding: 8px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--lado-bg, transparent);
+}
+.bacara-col.lado-jugador { --lado: #2e86ff; --lado-bg: rgba(46,134,255,0.07); }
+.bacara-col.lado-banca   { --lado: #e23b3b; --lado-bg: rgba(226,59,59,0.07); }
+.bacara-col.lado-empate  { --lado: #1ea361; --lado-bg: rgba(30,163,97,0.07); }
+.bacara-col-head { font-weight: 800; color: var(--lado); display: flex; justify-content: space-between; }
+.bacara-col-body { display: flex; flex-direction: column; gap: 6px; }
+.bacara-fila { display: flex; gap: 4px; align-items: center; }
+.bacara-fila select { flex: 1; min-width: 0; padding: 7px; }
+.bacara-fila input { width: 84px; padding: 7px; }
+.bacara-fila .btn-danger { padding: 2px 7px; }
+
+@media (max-width: 560px) {
+  .bacara-col-head { font-size: 13px; }
+  .bacara-fila input { width: 70px; }
+  .bacara-win { font-size: 13px; padding: 12px 4px; }
+}
