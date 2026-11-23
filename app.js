@@ -46,6 +46,7 @@ const state = {
 // por defecto (editables por ronda). Cada cajero que apuesta = 1 apuesta/1 línea.
 const BACARA_RESULTADOS = ["Jugador", "Banca"];
 const BACARA_CUOTAS = { Jugador: 2, Banca: 1.95 }; // Jugador 1:1 · Banca 0.95:1
+const BACARA_MONTO = "120000"; // monto por defecto de cada apuesta de bacará (editable)
 const BACARA_COLOR = { Jugador: "#2e86ff", Banca: "#e23b3b" };
 const esBacara = (p) => !!(p && p.es_bacara);
 // Lado (Jugador/Banca) al que apostó una apuesta de bacará = resultado de su línea.
@@ -2003,8 +2004,8 @@ function abrirModalBacara() {
   bacaraDraft = {
     cuotas: { ...BACARA_CUOTAS },
     filas: [
-      { lado: "Jugador", cajera: "", monto: "100000" },
-      { lado: "Banca", cajera: "", monto: "100000" },
+      { lado: "Jugador", cajera: "", monto: BACARA_MONTO },
+      { lado: "Banca", cajera: "", monto: BACARA_MONTO },
     ],
   };
 
@@ -2059,7 +2060,7 @@ function renderBacaraCols(dlg) {
         `<option value="${esc(x.nombre)}" ${x.nombre === fila.cajera ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
       return `<div class="bacara-fila" data-i="${i}">
         <select data-bf="cajera"><option value="">— cajero —</option>${opts}</select>
-        <input type="text" inputmode="decimal" data-bf="monto" value="${fila.monto}" placeholder="100000" />
+        <input type="text" inputmode="decimal" data-bf="monto" value="${fila.monto}" placeholder="${BACARA_MONTO}" />
         <button type="button" class="btn-danger btn-sm" data-brm="${i}" title="Quitar">✕</button>
       </div>`;
     }).join("");
@@ -2081,7 +2082,7 @@ function renderBacaraCols(dlg) {
     renderBacaraCols(dlg);
   }));
   $$("[data-badd]", cont).forEach((b) => b.addEventListener("click", () => {
-    bacaraDraft.filas.push({ lado: b.dataset.badd, cajera: "", monto: "100000" });
+    bacaraDraft.filas.push({ lado: b.dataset.badd, cajera: "", monto: BACARA_MONTO });
     renderBacaraCols(dlg);
   }));
   actualizarResumenBacara(dlg);
@@ -2161,7 +2162,7 @@ function abrirAgregarBacara(p, lado) {
       <div class="modal-body">
         <div class="grid grid-2">
           <div><label>Cajero</label><select name="cajera"><option value="">— elegir —</option>${opts}</select></div>
-          <div><label>Monto</label><input type="text" inputmode="decimal" name="monto" value="100000" required autofocus /></div>
+          <div><label>Monto</label><input type="text" inputmode="decimal" name="monto" value="${BACARA_MONTO}" required autofocus /></div>
           <div><label>Cuota</label><input type="text" inputmode="decimal" name="cuota" value="${cuotaDef}" /></div>
         </div>
       </div>
