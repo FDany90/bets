@@ -2468,16 +2468,15 @@ function bindCajeras() {
   $("#cargar-saldo")?.addEventListener("click", () => abrirCargar(null));
   $("#retirar-saldo")?.addEventListener("click", () => abrirRetirar(null));
   $("#ganancia-manual")?.addEventListener("click", () => abrirGanancia(null));
-  // Botón global: el sentido default depende del sub-tab (Cajeros → Cuenta→Cajero; Cuentas → Cajero→Cuenta).
-  $("#transferir")?.addEventListener("click", () => abrirTransferir({
-    dir: state.cajerasTab === "cuenta" ? "cajero_a_cuenta" : "cuenta_a_cajero",
-  }));
+  // Botón global: siempre arranca en Cuenta → Cajero (es el flujo más común).
+  $("#transferir")?.addEventListener("click", () => abrirTransferir({ dir: "cuenta_a_cajero" }));
   $("#ver-transf")?.addEventListener("click", () => abrirTransferencias());
   $$("[data-ganancia]").forEach((b) => b.addEventListener("click", () => abrirGanancia(byId(b.dataset.ganancia))));
   $$("[data-cargar]").forEach((b) => b.addEventListener("click", () => abrirCargar(byId(b.dataset.cargar))));
   $$("[data-retirar]").forEach((b) => b.addEventListener("click", () => abrirRetirar(byId(b.dataset.retirar))));
-  // Transferir desde una cuenta: sentido Cajero → Cuenta, cuenta preseleccionada.
-  $$("[data-transf]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cuentaId: b.dataset.transf, dir: "cajero_a_cuenta" })));
+  // Transferir desde una cuenta: sentido Cuenta → Cajero, cuenta preseleccionada
+  // (y el selector de cajero se filtra a los cajeros de esa cuenta).
+  $$("[data-transf]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cuentaId: b.dataset.transf, dir: "cuenta_a_cajero" })));
   // Transferir desde un cajero: sentido Cuenta → Cajero, cajero preseleccionado.
   $$("[data-transf-cajero]").forEach((b) => b.addEventListener("click", () => abrirTransferir({ cajeroId: b.dataset.transfCajero, dir: "cuenta_a_cajero" })));
   $$("[data-movs]").forEach((b) => b.addEventListener("click", () => abrirMovimientos(byId(b.dataset.movs))));
@@ -2870,8 +2869,18 @@ function abrirTransferir(prefill) {
     return;
   }
   const cp = comisionCuentaPct();
-  const cajeroOpts = cajeros.map((x) => `<option value="${x.id}" ${pf.cajeroId === x.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
-  const cuentaOpts = cuentas.map((x) => `<option value="${x.id}" ${pf.cuentaId === x.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+  // Cajeros de una cuenta (los asociados vía cuenta_id). Si la cuenta no tiene
+  // ninguno asociado, se muestran todos (fallback, para no romper cuentas viejas).
+  const cajerosParaCuenta = (cuentaId) => {
+    const asociados = cajeros.filter((x) => x.cuenta_id && x.cuenta_id === cuentaId);
+    return asociados.length ? asociados : cajeros;
+  };
+  // Si se abre desde un cajero, su cuenta asociada arranca seleccionada (así el cajero aparece en la lista filtrada).
+  const cajeroPrefill = pf.cajeroId ? cajeros.find((x) => x.id === pf.cajeroId) : null;
+  const cuentaInicial = pf.cuentaId || (cajeroPrefill && cajeroPrefill.cuenta_id) || (cuentas[0] && cuentas[0].id) || "";
+  const cajeroOpts = cajerosParaCuenta(cuentaInicial)
+    .map((x) => `<option value="${x.id}" ${pf.cajeroId === x.id ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+  const cuentaOpts = cuentas.map((x) => `<option value="${x.id}" ${x.id === cuentaInicial ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
 
   const dlg = document.createElement("dialog");
   dlg.innerHTML = `
@@ -2911,6 +2920,14 @@ function abrirTransferir(prefill) {
   const cerrar = () => { dlg.close(); dlg.remove(); };
   $("#t-cerrar", dlg).addEventListener("click", cerrar);
   $("#t-cancelar", dlg).addEventListener("click", cerrar);
+
+  // Re-arma el <select> de cajero según la cuenta elegida (solo sus cajeros).
+  const renderCajeroOpts = () => {
+    const lista = cajerosParaCuenta(f.cuenta_id.value);
+    const prev = f.cajero_id.value;
+    const sel = lista.some((x) => x.id === prev) ? prev : (lista[0] ? lista[0].id : "");
+    f.cajero_id.innerHTML = lista.map((x) => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.nombre)}</option>`).join("");
+  };
 
   // Devuelve { origen, destino } según el sentido elegido.
   const partes = () => {
@@ -2964,9 +2981,11 @@ function abrirTransferir(prefill) {
       <div class="rt-total"><span>Saldo ${esc(origen ? origen.nombre : "")} luego</span><b class="${saldoOrigen - sale >= 0 ? "pos" : "neg"}">${money(Math.max(0, saldoOrigen - sale))}</b></div>
       ${insuf ? `<p class="muted" style="margin:8px 0 0;font-size:12px;color:var(--warn)">⚠️ El saldo de ${esc(origen ? origen.nombre : "")} (${money(saldoOrigen)}) es menor a monto + propina.</p>` : ""}`;
   };
-  // Al cambiar el sentido o el cajero, resetea el bono al default (del casino).
+  // Al cambiar la cuenta, re-filtra los cajeros a los de esa cuenta.
+  // Al cambiar el sentido/cajero/cuenta, resetea el bono al default (del casino).
   f.addEventListener("change", (e) => {
-    if (e.target.name === "dir" || e.target.name === "cajero_id") {
+    if (e.target.name === "cuenta_id") renderCajeroOpts();
+    if (["dir", "cajero_id", "cuenta_id"].includes(e.target.name)) {
       transfBonoPct = bonoDefault(partes().destino);
       renderBonoWrap();
     }
@@ -3113,6 +3132,13 @@ function opcionesAdmin(selId) {
     state.admins.map((a) => `<option value="${a.id}" ${a.id === selId ? "selected" : ""}>${esc(a.nombre)}</option>`).join("");
 }
 
+// Opciones de CUENTA (para asociar un cajero a una cuenta). Solo las cajeras que son cuenta.
+function opcionesCuenta(selId) {
+  return `<option value="">— sin cuenta —</option>` +
+    state.cajeras.filter((c) => esCuenta(c))
+      .map((c) => `<option value="${c.id}" ${c.id === selId ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+}
+
 function viewConfig() {
   const casas = state.casas.map((c) => `<div class="cajera-cfg">
     <span class="cajera-cfg-nombre">${esc(c.nombre)}<span class="muted">${c.tiene_cajeras ? " · 💰 cajeras" : ""}${c.permite_gratis ? " · 🎁 gratis" : ""}</span></span>
@@ -3124,6 +3150,7 @@ function viewConfig() {
     ${esCuenta(c) ? `<span class="muted">sin casino</span>` : `<select data-casa-cajera="${c.id}">${opcionesCasaCajera(c.casa_id)}</select>`}
     <label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap" title="Marcar como cuenta (persona, no apuesta)"><input type="checkbox" data-cuenta-cajera="${c.id}" ${esCuenta(c) ? "checked" : ""} style="width:auto" /> 👤 cuenta</label>
     ${esCuenta(c) ? "" : `<label class="muted" style="display:flex;align-items:center;gap:6px;white-space:nowrap" title="Si está tildado, aparece al cargar apuestas"><input type="checkbox" data-activo-cajera="${c.id}" ${esActivo(c) ? "checked" : ""} style="width:auto" /> ✅ apuestas</label>`}
+    ${esCuenta(c) ? "" : `<select data-cuenta-asoc="${c.id}" title="Cuenta asociada (para transferir)">${opcionesCuenta(c.cuenta_id)}</select>`}
     <select data-admin-cajera="${c.id}" title="Admin">${opcionesAdmin(c.admin_id)}</select>
     <button class="btn-danger btn-sm" data-del-cajera="${c.id}" title="Borrar">✕</button>
   </div>`).join("");
@@ -3268,6 +3295,12 @@ function bindConfig() {
   }));
   $$("[data-casa-cajera]").forEach((sel) => sel.addEventListener("change", async () => {
     const { error } = await sb.from("cajeras").update({ casa_id: sel.value || null }).eq("id", sel.dataset.casaCajera);
+    if (error) { alert("Error: " + error.message); return; }
+    await cargarTodo(); render();
+  }));
+  $$("[data-cuenta-asoc]").forEach((sel) => sel.addEventListener("change", async () => {
+    // Asociar el cajero a una cuenta (para filtrar los cajeros al transferir).
+    const { error } = await sb.from("cajeras").update({ cuenta_id: sel.value || null }).eq("id", sel.dataset.cuentaAsoc);
     if (error) { alert("Error: " + error.message); return; }
     await cargarTodo(); render();
   }));
