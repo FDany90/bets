@@ -2072,7 +2072,7 @@ function abrirCargar(cajeraFija) {
           <div><label>Cajera</label>${seleccionable
             ? `<select name="cajera_id">${cajeraOpts}</select>`
             : `<input value="${esc(cajeraFija.nombre)}" disabled />`}</div>
-          <div><label>Monto a cargar</label><input type="text" inputmode="decimal" name="monto" placeholder="100000" required autofocus /></div>
+          <div><label>Monto a cargar</label><input type="text" inputmode="decimal" name="monto" value="100000" placeholder="100000" required autofocus /></div>
           <div><label>Bono %</label><input type="text" inputmode="decimal" name="bono" /></div>
           <label style="display:flex;align-items:flex-end;gap:6px;color:var(--text);cursor:pointer;padding-bottom:8px">
             <input type="checkbox" name="con_bono" checked style="width:auto" /> Cargar con bono
@@ -2094,6 +2094,9 @@ function abrirCargar(cajeraFija) {
   const cerrar = () => { dlg.close(); dlg.remove(); };
   $("#c-cerrar", dlg).addEventListener("click", cerrar);
   $("#c-cancelar", dlg).addEventListener("click", cerrar);
+
+  // monto precargado en 100.000: seleccionarlo al abrir para poder escribir encima
+  f.monto.select?.();
 
   const cajeraActual = () => seleccionable
     ? state.cajeras.find((x) => x.id === f.cajera_id.value)
